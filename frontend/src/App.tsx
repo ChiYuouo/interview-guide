@@ -6,6 +6,9 @@ import type { Difficulty } from './components/UnifiedInterviewModal';
 import type { CategoryDTO } from './api/skill';
 import { Loader2 } from 'lucide-react';
 import { ROUTE_PATTERNS, ROUTES } from './constants/routes';
+import { authApi } from './api/auth';
+import { SESSION_EXPIRED_EVENT, SessionExpiredError, getErrorMessage } from './api/request';
+import type { UserSession } from './types/auth';
 
 // Lazy load components
 const UploadPage = lazy(() => import('./pages/UploadPage'));
@@ -24,6 +27,7 @@ const VoiceInterviewEvaluationPage = lazy(() => import('./pages/VoiceInterviewEv
 const InterviewSchedulePage = lazy(() => import('./pages/InterviewSchedulePage'));
 const InterviewHubPage = lazy(() => import('./pages/InterviewHubPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
 const InterviewDetailPanel = lazy(() => import('./components/InterviewDetailPanel'));
 
 // Loading component
@@ -184,8 +188,76 @@ function App() {
   return (
     <BrowserRouter>
       <Suspense fallback={<Loading />}>
+        <AppRoutes />
+      </Suspense>
+    </BrowserRouter>
+  );
+}
+
+function AppRoutes() {
+  const location = useLocation();
+  const [session, setSession] = useState<UserSession | null>();
+  const [sessionError, setSessionError] = useState('');
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    const clearSession = () => setSession(null);
+    window.addEventListener(SESSION_EXPIRED_EVENT, clearSession);
+    authApi.session()
+      .then(user => { if (active) setSession(user); })
+      .catch(error => {
+        if (active && !(error instanceof SessionExpiredError)) {
+          setSessionError(getErrorMessage(error));
+        }
+      });
+    return () => {
+      active = false;
+      window.removeEventListener(SESSION_EXPIRED_EVENT, clearSession);
+    };
+  }, [attempt]);
+
+  if (sessionError) {
+    return (
+      <main className="grid min-h-dvh place-items-center px-5">
+        <div className="text-center">
+          <p role="alert" className="mb-4">{sessionError}</p>
+          <button type="button" className="rounded-lg bg-primary-600 px-4 py-2 text-white"
+            onClick={() => {
+              setSessionError('');
+              setAttempt(value => value + 1);
+            }}
+          >
+            重试
+          </button>
+        </div>
+      </main>
+    );
+  }
+  if (session === undefined) return <Loading />;
+
+  const from = (location.state as { from?: string } | null)?.from;
+  const returnTo = typeof from === 'string' && /^\/(?![\\/])/.test(from)
+    ? from
+    : ROUTES.resumeHistory;
+
+  async function logout() {
+    await authApi.logout();
+    setSession(null);
+  }
+
+  return (
         <Routes>
-          <Route path="/" element={<Layout />}>
+          <Route path={ROUTES.login} element={session
+            ? <Navigate to={returnTo} replace />
+            : <LoginPage onLogin={setSession} />}
+          />
+          <Route path="/" element={session
+            ? <Layout username={session.username} onLogout={logout} />
+            : <Navigate to={ROUTES.login} replace state={{
+              from: `${location.pathname}${location.search}${location.hash}`,
+            }} />}
+          >
             {/* 默认重定向到简历管理页面 */}
             <Route index element={<Navigate to="/history" replace />} />
 
@@ -249,8 +321,6 @@ function App() {
           </Route>
 
         </Routes>
-      </Suspense>
-    </BrowserRouter>
   );
 }
 

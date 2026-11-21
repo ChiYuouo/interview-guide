@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createServer as createHttpServer, type Server } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/authenticated';
 import { createServer, type ViteDevServer } from 'vite';
 
 let upstream: Server;

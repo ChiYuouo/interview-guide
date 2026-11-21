@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/authenticated';
 
 const SESSION_ID = 42;
 const USER_SUBTITLE = '我负责订单系统的幂等设计。';

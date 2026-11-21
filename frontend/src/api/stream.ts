@@ -1,4 +1,7 @@
-import { API_BASE_URL, getErrorMessage, getResultError, parseResultPayload } from './request';
+import {
+  API_BASE_URL, getCsrfToken, getErrorMessage, getResultError, notifySessionExpired,
+  parseResultPayload,
+} from './request';
 
 type SseParseMode = 'line' | 'event';
 
@@ -270,7 +273,13 @@ async function readStream(response: Response, options: StreamSseOptions): Promis
 
 export async function streamSse(options: StreamSseOptions): Promise<void> {
   try {
-    const response = await fetch(toApiUrl(options.url), options.init);
+    const headers = new Headers(options.init.headers);
+    const csrf = await getCsrfToken(options.init.method);
+    if (csrf) headers.set(csrf.headerName, csrf.token);
+    const response = await fetch(toApiUrl(options.url), {
+      ...options.init, headers, credentials: 'include',
+    });
+    if (response.status === 401) notifySessionExpired();
     await assertStreamResponse(response);
     await readStream(response, options);
     options.onComplete();

@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
+import type { CsrfToken } from '../types/auth';
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -19,10 +20,34 @@ const SUCCESS_CODE = 200;
 const RESULT_BLOB_PARSE_LIMIT = 64 * 1024;
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+export const SESSION_EXPIRED_EVENT = 'interview:session-expired';
+
+export class SessionExpiredError extends Error {
+  constructor() {
+    super('请先登录');
+  }
+}
+
+export function notifySessionExpired() {
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
 
 const instance: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000,
+  withCredentials: true,
+});
+
+export async function getCsrfToken(method = 'GET'): Promise<CsrfToken | null> {
+  if (/^(GET|HEAD|OPTIONS|TRACE)$/i.test(method)) return null;
+  const { data } = await instance.get<CsrfToken>('/api/auth/csrf');
+  return data;
+}
+
+instance.interceptors.request.use(async config => {
+  const csrf = await getCsrfToken(config.method);
+  if (csrf) config.headers.set(csrf.headerName, csrf.token);
+  return config;
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -133,9 +158,14 @@ instance.interceptors.response.use(
     return response;
   },
   async (error) => {
+    if (!axios.isAxiosError(error)) throw error;
     // 有响应的情况：后端返回了结果（即使是错误）
     if (error.response) {
       const { data, status } = error.response;
+      if (status === 401) {
+        notifySessionExpired();
+        throw new SessionExpiredError();
+      }
       // 尝试解析 Result 格式
       const responseError = await getErrorFromResponseData(data);
       if (responseError) {

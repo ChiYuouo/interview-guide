@@ -1,10 +1,11 @@
 import {Link, Outlet, useLocation, useNavigate} from 'react-router-dom';
 import {motion} from 'framer-motion';
-import {BookOpen, Calendar, ChevronRight, Database, FileStack, MessageSquare, Moon, Settings, Sparkles, Sun, Users,} from 'lucide-react';
+import {BookOpen, Calendar, ChevronRight, Database, FileStack, LogOut, MessageSquare, Moon, Settings, Sparkles, Sun, Users,} from 'lucide-react';
 import {useTheme} from '../hooks/useTheme';
 import {useState} from 'react';
 import UnifiedInterviewModal, {UnifiedInterviewConfig} from './UnifiedInterviewModal';
 import {ROUTES} from '../constants/routes';
+import {getErrorMessage} from '../api/request';
 
 interface NavItem {
   id: string;
@@ -20,11 +21,18 @@ interface NavGroup {
   items: NavItem[];
 }
 
-export default function Layout() {
+interface LayoutProps {
+  username: string;
+  onLogout: () => Promise<void>;
+}
+
+export default function Layout({username, onLogout}: LayoutProps) {
   const location = useLocation();
   const currentPath = location.pathname;
   const {theme, toggleTheme} = useTheme();
   const navigate = useNavigate();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const [interviewModalPreset, setInterviewModalPreset] = useState<{
     defaultMode: 'text' | 'voice';
     defaultResumeId?: number;
@@ -32,6 +40,18 @@ export default function Layout() {
     subtitle: string;
     startButtonText: string;
   } | null>(null);
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    setLogoutError('');
+    try {
+      await onLogout();
+    } catch (error) {
+      setLogoutError(getErrorMessage(error));
+    } finally {
+      setLoggingOut(false);
+    }
+  };
 
   const openInterviewModalWithResume = (resumeId: number) => {
     setInterviewModalPreset({
@@ -220,12 +240,20 @@ export default function Layout() {
           </div>
         </nav>
 
-        {/* 底部信息 */}
+        {/* 当前账号 */}
         <div className="p-4 border-t border-slate-100 dark:border-slate-700">
-          <div className="px-3 py-2 bg-gradient-to-r from-primary-50 to-indigo-50 dark:from-primary-900/30 dark:to-slate-800 rounded-xl">
-            <p className="text-xs text-primary-600 dark:text-primary-400 font-medium">AI 面试助手 v1.0</p>
-            <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Powered by AI</p>
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate px-2 text-sm font-medium" title={username}>{username}</span>
+            <button type="button" onClick={handleLogout} disabled={loggingOut}
+              className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-2 text-sm
+                text-slate-600 hover:bg-slate-100 disabled:opacity-60 dark:text-slate-300
+                dark:hover:bg-slate-800"
+            >
+              <LogOut aria-hidden="true" className="size-4" />
+              {loggingOut ? '退出中…' : '退出登录'}
+            </button>
           </div>
+          {logoutError && <p role="alert" className="mt-2 text-xs text-red-600">{logoutError}</p>}
         </div>
       </aside>
 

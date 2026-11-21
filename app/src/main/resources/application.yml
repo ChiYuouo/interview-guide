@@ -10,6 +10,14 @@ server:
   port: 8080
   # 明确指定HTTP响应编码
   servlet:
+    session:
+      timeout: 8h
+      tracking-modes: cookie
+      cookie:
+        name: INTERVIEW_SESSION
+        http-only: true
+        same-site: lax
+        secure: ${APP_AUTH_COOKIE_SECURE:false}
     encoding:
       charset: UTF-8
       enabled: true
@@ -95,6 +103,9 @@ spring:
 
 # Application custom configuration
 app:
+  auth:
+    username: ${APP_AUTH_USERNAME:admin}
+    password: ${APP_AUTH_PASSWORD:}
   ai:
     default-provider: dashscope
     default-embedding-provider: dashscope

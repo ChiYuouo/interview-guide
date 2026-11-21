@@ -1,4 +1,5 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test } from './fixtures/authenticated';
+import type { Page, Route } from '@playwright/test';
 
 const fixture = (name: string) => ({
   name,

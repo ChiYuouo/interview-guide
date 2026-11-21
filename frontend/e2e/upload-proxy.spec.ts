@@ -1,6 +1,6 @@
 import { createServer as createHttpServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures/authenticated';
 import { createServer, type ViteDevServer } from 'vite';
 
 let upstream: Server;
