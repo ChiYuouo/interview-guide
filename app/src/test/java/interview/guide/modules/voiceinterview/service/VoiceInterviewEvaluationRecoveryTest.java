@@ -83,11 +83,11 @@ class VoiceInterviewEvaluationRecoveryTest {
         VoiceInterviewSessionEntity session = inProgressSession(1L);
         when(sessionRepository.findById(1L)).thenReturn(Optional.of(session));
 
-        voiceInterviewService.endSessionIfInProgress("1");
+        voiceInterviewService.endSessionIfInProgress(1L);
 
         assertThat(session.getStatus()).isEqualTo(VoiceInterviewSessionStatus.COMPLETED);
         assertThat(session.getEvaluateStatus()).isEqualTo(AsyncTaskStatus.PENDING);
-        verify(voiceEvaluateStreamProducer).sendEvaluateTask("1");
+        verify(voiceEvaluateStreamProducer).sendEvaluateTask(1L);
     }
 
     @Test
@@ -103,7 +103,7 @@ class VoiceInterviewEvaluationRecoveryTest {
         int cleaned = voiceInterviewService.cleanupStaleSessions();
 
         assertThat(cleaned).isEqualTo(1);
-        verify(voiceEvaluateStreamProducer).sendEvaluateTask("2");
+        verify(voiceEvaluateStreamProducer).sendEvaluateTask(2L);
     }
 
     @Test
@@ -131,7 +131,7 @@ class VoiceInterviewEvaluationRecoveryTest {
         int cleaned = voiceInterviewService.cleanupStaleSessions();
 
         assertThat(cleaned).isEqualTo(1);
-        verify(voiceEvaluateStreamProducer).sendEvaluateTask("3");
+        verify(voiceEvaluateStreamProducer).sendEvaluateTask(3L);
     }
 
     @Test

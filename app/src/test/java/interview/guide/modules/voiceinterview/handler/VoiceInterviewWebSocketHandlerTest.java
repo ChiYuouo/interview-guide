@@ -2,8 +2,10 @@ package interview.guide.modules.voiceinterview.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
+import interview.guide.modules.voiceinterview.config.VoiceInterviewHandshakeInterceptor;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.context.VoiceContextCompressor;
+import interview.guide.modules.voiceinterview.dto.WebSocketControlMessage;
 import interview.guide.modules.voiceinterview.service.DashscopeLlmService;
 import interview.guide.modules.voiceinterview.service.QwenAsrService;
 import interview.guide.modules.voiceinterview.service.QwenTtsService;
@@ -73,6 +75,28 @@ class VoiceInterviewWebSocketHandlerTest {
   }
 
   @Test
+  @DisplayName("WebSocket 结束语音面试使用握手绑定的账号和会话 ID")
+  void endsInterviewWithTheAuthenticatedSocketAccount() throws Exception {
+    handler = newHandler(new VoiceInterviewProperties());
+    var socket = mock(WebSocketSession.class);
+    when(socket.getAttributes()).thenReturn(Map.of(
+        VoiceInterviewHandshakeInterceptor.USER_ID_ATTRIBUTE, 7L,
+        VoiceInterviewHandshakeInterceptor.SESSION_ID_ATTRIBUTE, 42L));
+
+    String payload = """
+        {"type":"control","action":"end_interview","data":{"userId":99,"sessionId":99}}
+        """;
+    var json = new ObjectMapper().readTree(payload);
+    when(objectMapper.readTree(payload)).thenReturn(json);
+    when(objectMapper.treeToValue(json, WebSocketControlMessage.class)).thenReturn(
+        WebSocketControlMessage.builder().action("end_interview").data(Map.of("userId", 99, "sessionId", 99)).build());
+
+    handler.handleTextMessage(socket, new TextMessage(payload));
+
+    verify(interviewService).endSession(7L, 42L);
+  }
+
+  @Test
   @DisplayName("默认关闭开场音频预热，应用启动时不调用云端 TTS")
   void shouldNotWarmupOpeningAudioByDefault() throws InterruptedException {
     VoiceInterviewProperties properties = new VoiceInterviewProperties();
@@ -115,9 +139,9 @@ class VoiceInterviewWebSocketHandlerTest {
   void shouldIgnoreLatePartialAfterPreviousTurnWasSubmitted() throws Exception {
     WebSocketSession session = mock(WebSocketSession.class);
     handler = newHandler(new VoiceInterviewProperties(), new ObjectMapper());
-    prepareSttState("49", session, true);
+    prepareSttState(49L, session, true);
 
-    invokeHandleSttResult("49", "这是上一轮回答", false);
+    invokeHandleSttResult(49L, "这是上一轮回答", false);
 
     verify(session, never()).sendMessage(any(TextMessage.class));
   }
@@ -128,9 +152,9 @@ class VoiceInterviewWebSocketHandlerTest {
     WebSocketSession session = mock(WebSocketSession.class);
     when(session.isOpen()).thenReturn(true);
     handler = newHandler(new VoiceInterviewProperties(), new ObjectMapper());
-    prepareSttState("49", session, false);
+    prepareSttState(49L, session, false);
 
-    invokeHandleSttResult("49", "这是当前轮回答", false);
+    invokeHandleSttResult(49L, "这是当前轮回答", false);
 
     ArgumentCaptor<TextMessage> messageCaptor = ArgumentCaptor.forClass(TextMessage.class);
     verify(session).sendMessage(messageCaptor.capture());
@@ -160,7 +184,7 @@ class VoiceInterviewWebSocketHandlerTest {
   }
 
   private void prepareSttState(
-      String sessionId,
+      Long sessionId,
       WebSocketSession session,
       boolean processing) throws Exception {
     fieldMap("sessions").put(sessionId, session);
@@ -177,20 +201,20 @@ class VoiceInterviewWebSocketHandlerTest {
   }
 
   private void invokeHandleSttResult(
-      String sessionId,
+      Long sessionId,
       String text,
       boolean finalSegment) throws Exception {
     Method method = VoiceInterviewWebSocketHandler.class.getDeclaredMethod(
-        "handleSttResult", String.class, String.class, boolean.class);
+        "handleSttResult", Long.class, String.class, boolean.class);
     method.setAccessible(true);
     method.invoke(handler, sessionId, text, finalSegment);
   }
 
   @SuppressWarnings("unchecked")
-  private Map<String, Object> fieldMap(String fieldName) throws Exception {
+  private Map<Long, Object> fieldMap(String fieldName) throws Exception {
     Field field = VoiceInterviewWebSocketHandler.class.getDeclaredField(fieldName);
     field.setAccessible(true);
-    return (Map<String, Object>) field.get(handler);
+    return (Map<Long, Object>) field.get(handler);
   }
   @Nested
   @DisplayName("STT 日志隐私")
@@ -223,12 +247,12 @@ class VoiceInterviewWebSocketHandlerTest {
       WebSocketSession session = mock(WebSocketSession.class);
       when(session.isOpen()).thenReturn(true);
       handler = newHandler(new VoiceInterviewProperties(), new ObjectMapper());
-      prepareSttState("51", session, true);
+      prepareSttState(51L, session, true);
 
-      invokeHandleSttResult("51", lateMarker, false);
+      invokeHandleSttResult(51L, lateMarker, false);
 
-      prepareSttState("52", session, false);
-      invokeHandleSttResult("52", finalMarker, true);
+      prepareSttState(52L, session, false);
+      invokeHandleSttResult(52L, finalMarker, true);
 
       StringBuilder logs = new StringBuilder();
       for (ILoggingEvent event : logAppender.list) {

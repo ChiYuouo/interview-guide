@@ -237,6 +237,7 @@ function AppRoutes() {
         `${ROUTES.resumeHistory}/:resumeId`, ROUTES.interviewHub, ROUTES.interviewHistory,
         ROUTES.interview, `/${ROUTE_PATTERNS.interviewCreate}`, `/${ROUTE_PATTERNS.interviewSession}`,
         `/${ROUTE_PATTERNS.interviewLegacy}`, `/${ROUTE_PATTERNS.interviewDetail}`,
+        ROUTES.voiceInterview, `/${ROUTE_PATTERNS.voiceInterviewEvaluation}`,
       ].some(path => matchPath(path, location.pathname))) {
     return <Navigate to={ROUTES.interviewSchedule} replace />;
   }
@@ -276,10 +277,10 @@ function AppRoutes() {
             <Route path="history/:resumeId" element={<ResumeDetailWrapper />} />
 
             {/* 面试中心 */}
-            <Route path={ROUTES.interviewHub.slice(1)} element={<InterviewHubPage enableVoice={session?.admin === true} />} />
+            <Route path={ROUTES.interviewHub.slice(1)} element={<InterviewHubPage />} />
 
             {/* 面试记录列表 */}
-            <Route path={ROUTES.interviewHistory.slice(1)} element={<InterviewHistoryWrapper enableVoice={session?.admin === true} />} />
+            <Route path={ROUTES.interviewHistory.slice(1)} element={<InterviewHistoryWrapper />} />
 
             {/* 面试详情报告 */}
             <Route path={ROUTE_PATTERNS.interviewDetail} element={<InterviewDetailPageWrapper />} />
@@ -297,10 +298,10 @@ function AppRoutes() {
             <Route path={ROUTE_PATTERNS.interviewLegacy} element={<InterviewWrapper />} />
 
             {/* 语音面试 */}
-            <Route path="voice-interview" element={<VoiceInterviewPageWrapper />} />
+            <Route path={ROUTES.voiceInterview.slice(1)} element={<VoiceInterviewPageWrapper />} />
 
             {/* 语音面试评估报告 */}
-            <Route path="voice-interview/:sessionId/evaluation" element={<VoiceInterviewEvaluationPage />} />
+            <Route path={ROUTE_PATTERNS.voiceInterviewEvaluation} element={<VoiceInterviewEvaluationPage />} />
 
             {/* 知识库管理 */}
             <Route path="knowledgebase" element={<KnowledgeBaseManagePageWrapper />} />
@@ -330,7 +331,7 @@ function AppRoutes() {
 }
 
 // 面试记录页面包装器
-function InterviewHistoryWrapper({ enableVoice }: { enableVoice: boolean }) {
+function InterviewHistoryWrapper() {
   const navigate = useNavigate();
   const { openInterviewModalWithResume } = useOutletContext<{ openInterviewModalWithResume: (resumeId: number) => void }>();
 
@@ -350,7 +351,7 @@ function InterviewHistoryWrapper({ enableVoice }: { enableVoice: boolean }) {
     navigate(ROUTES.interviewSession(sessionId));
   };
 
-  return <InterviewHistoryPage onBack={handleBack} onViewInterview={handleViewInterview} onRestartInterview={handleRestartInterview} onContinueInterview={handleContinueInterview} enableVoice={enableVoice} />;
+  return <InterviewHistoryPage onBack={handleBack} onViewInterview={handleViewInterview} onRestartInterview={handleRestartInterview} onContinueInterview={handleContinueInterview} />;
 }
 
 // 知识库面试记录页面包装器

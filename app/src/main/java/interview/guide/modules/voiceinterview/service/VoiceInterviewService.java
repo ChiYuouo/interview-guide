@@ -58,7 +58,6 @@ public class VoiceInterviewService {
 
     private static final String SESSION_CACHE_KEY_PREFIX = "voice:interview:session:";
     private static final int CACHE_TTL_HOURS = 1;
-    private static final String DEFAULT_USER_ID = "default";
     private static final Duration PENDING_EVALUATION_REQUEUE_DELAY = Duration.ofMinutes(3);
     private static final Duration PROCESSING_EVALUATION_TIMEOUT = Duration.ofMinutes(30);
 
@@ -70,14 +69,14 @@ public class VoiceInterviewService {
      * @return SessionResponseDTO with session details and WebSocket URL
      */
     @Transactional
-    public SessionResponseDTO createSession(CreateSessionRequest request) {
+    public SessionResponseDTO createSession(Long userId, CreateSessionRequest request) {
         String effectiveSkillId = request.getSkillId() != null ? request.getSkillId() : InterviewDefaults.SKILL_ID;
         String effectiveLlmProvider = (request.getLlmProvider() != null && !request.getLlmProvider().isBlank())
             ? request.getLlmProvider()
             : null;
 
         VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
-                .userId(DEFAULT_USER_ID)
+                .userId(userId)
                 .roleType(effectiveSkillId)
                 .skillId(effectiveSkillId)
                 .difficulty(request.getDifficulty() != null ? request.getDifficulty() : InterviewDefaults.DIFFICULTY)
@@ -106,35 +105,27 @@ public class VoiceInterviewService {
      * 正常结束的 endSession 已设为 COMPLETED，此方法不会重复操作。
      */
     @Transactional
-    public void endSessionIfInProgress(String sessionId) {
-        Long sessionIdLong = parseSessionId(sessionId);
-        VoiceInterviewSessionEntity session = sessionRepository.findById(sessionIdLong).orElse(null);
+    public void endSessionIfInProgress(Long sessionId) {
+        VoiceInterviewSessionEntity session = sessionRepository.findById(sessionId).orElse(null);
         if (session == null || session.getStatus() != VoiceInterviewSessionStatus.IN_PROGRESS) {
             return;
         }
         log.info("Auto-ending IN_PROGRESS session {} after WebSocket disconnect", sessionId);
         endSession(session);
-        sendEvaluateTaskAfterCommit(sessionIdLong);
+        sendEvaluateTaskAfterCommit(sessionId);
     }
 
     /**
      * End interview session and update status
      * 结束面试会话并更新状态
      *
-     * @param sessionId Session ID (String format, will be converted to Long)
+     * @param userId 当前登录账号 ID
+     * @param sessionId 会话 ID
      */
     @Transactional
-    public void endSession(String sessionId) {
-        Long sessionIdLong = parseSessionId(sessionId);
-        VoiceInterviewSessionEntity session = getSession(sessionIdLong);
-
-        if (session == null) {
-            log.warn("Session not found: {}", sessionId);
-            return;
-        }
-
-        endSession(session);
-        sendEvaluateTaskAfterCommit(sessionIdLong);
+    public void endSession(Long userId, Long sessionId) {
+        endSession(requireOwnedSession(userId, sessionId));
+        sendEvaluateTaskAfterCommit(sessionId);
     }
 
     private void endSession(VoiceInterviewSessionEntity session) {
@@ -155,17 +146,6 @@ public class VoiceInterviewService {
      * Get session by ID with Redis cache fallback
      * 通过ID获取会话，支持Redis缓存
      *
-     * @param sessionId Session ID (String format, will be converted to Long)
-     * @return VoiceInterviewSessionEntity or null if not found
-     */
-    public VoiceInterviewSessionEntity getSession(String sessionId) {
-        return getSession(parseSessionId(sessionId));
-    }
-
-    /**
-     * Get session by ID with Redis cache fallback
-     * 通过ID获取会话，支持Redis缓存
-     *
      * @param sessionId Session ID as Long
      * @return VoiceInterviewSessionEntity or null if not found
      */
@@ -175,9 +155,7 @@ public class VoiceInterviewService {
         }
 
         // Try cache first
-        String cacheKey = getSessionCacheKey(sessionId);
-        RBucket<VoiceInterviewSessionEntity> bucket = redissonClient.getBucket(cacheKey);
-        VoiceInterviewSessionEntity cached = bucket.get();
+        VoiceInterviewSessionEntity cached = getCachedSession(sessionId);
 
         if (cached != null) {
             log.debug("Session {} found in cache", sessionId);
@@ -188,6 +166,30 @@ public class VoiceInterviewService {
         return sessionRepository.findById(sessionId).orElse(null);
     }
 
+    public VoiceInterviewSessionEntity requireOwnedSession(Long userId, Long sessionId) {
+        VoiceInterviewSessionEntity session = findOwnedSession(userId, sessionId);
+        if (session == null) {
+            throw new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "会话不存在: " + sessionId);
+        }
+        return session;
+    }
+
+    public boolean ownsSession(Long userId, Long sessionId) {
+        return sessionRepository.existsByIdAndUserId(sessionId, userId);
+    }
+
+    private VoiceInterviewSessionEntity findOwnedSession(Long userId, Long sessionId) {
+        VoiceInterviewSessionEntity cached = getCachedSession(sessionId);
+        if (cached != null) {
+            return userId.equals(cached.getUserId()) ? cached : null;
+        }
+        return sessionRepository.findByIdAndUserId(sessionId, userId).orElse(null);
+    }
+
+    private VoiceInterviewSessionEntity getCachedSession(Long sessionId) {
+        return redissonClient.<VoiceInterviewSessionEntity>getBucket(getSessionCacheKey(sessionId)).get();
+    }
+
     /**
      * Start a new interview phase
      * 开始新的面试阶段
@@ -196,9 +198,8 @@ public class VoiceInterviewService {
      * @param phaseStr  Phase as string (INTRO, TECH, PROJECT, HR)
      */
     @Transactional
-    public void startPhase(String sessionId, String phaseStr) {
-        Long sessionIdLong = parseSessionId(sessionId);
-        VoiceInterviewSessionEntity session = getSession(sessionIdLong);
+    public void startPhase(Long sessionId, String phaseStr) {
+        VoiceInterviewSessionEntity session = getSession(sessionId);
 
         if (session == null) {
             log.warn("Cannot start phase - session not found: {}", sessionId);
@@ -228,7 +229,7 @@ public class VoiceInterviewService {
      * @param sessionId Session ID (String format)
      * @return Current InterviewPhase or null if session not found
      */
-    public VoiceInterviewSessionEntity.InterviewPhase getCurrentPhase(String sessionId) {
+    public VoiceInterviewSessionEntity.InterviewPhase getCurrentPhase(Long sessionId) {
         VoiceInterviewSessionEntity session = getSession(sessionId);
         return session != null ? session.getCurrentPhase() : null;
     }
@@ -242,9 +243,8 @@ public class VoiceInterviewService {
      * @param aiText    AI's generated response text
      */
     @Transactional
-    public void saveMessage(String sessionId, String userText, String aiText) {
-        Long sessionIdLong = parseSessionId(sessionId);
-        VoiceInterviewSessionEntity session = getSession(sessionIdLong);
+    public void saveMessage(Long sessionId, String userText, String aiText) {
+        VoiceInterviewSessionEntity session = getSession(sessionId);
 
         if (session == null) {
             log.warn("Cannot save message - session not found: {}", sessionId);
@@ -255,20 +255,20 @@ public class VoiceInterviewService {
         String normalizedAiText = VoiceInterviewMessageEntity.trimToNull(aiText);
 
         boolean answerAttached = normalizedUserText != null
-            && fillLatestUnansweredQuestion(sessionIdLong, normalizedUserText);
+            && fillLatestUnansweredQuestion(sessionId, normalizedUserText);
         if (normalizedAiText == null) {
             return;
         }
 
         VoiceInterviewMessageEntity message = VoiceInterviewMessageEntity.builder()
-                .sessionId(sessionIdLong)
+                .sessionId(sessionId)
                 .messageType("DIALOGUE")
                 .phase(session.getCurrentPhase())
                 .userRecognizedText(normalizedUserText != null && !answerAttached
                     ? normalizedUserText
                     : null)
                 .aiGeneratedText(normalizedAiText)
-                .sequenceNum(getNextSequenceNum(sessionIdLong))
+                .sequenceNum(getNextSequenceNum(sessionId))
                 .build();
 
         messageRepository.save(message);
@@ -297,19 +297,17 @@ public class VoiceInterviewService {
      * @param sessionId Session ID (String format)
      * @return List of messages ordered by sequence number
      */
-    public List<VoiceInterviewMessageEntity> getConversationHistory(String sessionId) {
-        Long sessionIdLong = parseSessionId(sessionId);
+    public List<VoiceInterviewMessageEntity> getConversationHistory(Long sessionId) {
         return messageRepository.findBySessionIdAndMessageTypeNotOrderBySequenceNumAsc(
-            sessionIdLong, VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY);
+            sessionId, VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY);
     }
 
     /**
      * 读取会话已持久化的上下文摘要行（message_type=SUMMARY）。无则空 Optional。
      */
-    public Optional<VoiceInterviewMessageEntity> loadSummaryRow(String sessionId) {
-        Long sessionIdLong = parseSessionId(sessionId);
+    public Optional<VoiceInterviewMessageEntity> loadSummaryRow(Long sessionId) {
         return messageRepository.findFirstBySessionIdAndMessageTypeOrderBySequenceNumAsc(
-            sessionIdLong, VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY);
+            sessionId, VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY);
     }
 
     /**
@@ -318,15 +316,14 @@ public class VoiceInterviewService {
      * LLM 压缩必须在事务外完成，本方法只做边界写入。
      */
     @Transactional(rollbackFor = Exception.class)
-    public void saveSummaryRow(String sessionId, String summary, int coveredSequenceNum) {
-        Long sessionIdLong = parseSessionId(sessionId);
-        sessionRepository.findByIdForUpdate(sessionIdLong)
+    public void saveSummaryRow(Long sessionId, String summary, int coveredSequenceNum) {
+        sessionRepository.findByIdForUpdate(sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
         VoiceInterviewMessageEntity row = messageRepository
             .findFirstBySessionIdAndMessageTypeOrderBySequenceNumAsc(
-                sessionIdLong, VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY)
+                sessionId, VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY)
             .orElseGet(() -> VoiceInterviewMessageEntity.builder()
-                .sessionId(sessionIdLong)
+                .sessionId(sessionId)
                 .messageType(VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY)
                 .sequenceNum(-1)
                 .build());
@@ -350,15 +347,14 @@ public class VoiceInterviewService {
      */
     @Deprecated
     @Transactional(rollbackFor = Exception.class)
-    public void saveSummaryRowLegacy(String sessionId, String summary, int coveredTurns) {
-        Long sessionIdLong = parseSessionId(sessionId);
-        sessionRepository.findByIdForUpdate(sessionIdLong)
+    public void saveSummaryRowLegacy(Long sessionId, String summary, int coveredTurns) {
+        sessionRepository.findByIdForUpdate(sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
         VoiceInterviewMessageEntity row = messageRepository
             .findFirstBySessionIdAndMessageTypeOrderBySequenceNumAsc(
-                sessionIdLong, VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY)
+                sessionId, VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY)
             .orElseGet(() -> VoiceInterviewMessageEntity.builder()
-                .sessionId(sessionIdLong)
+                .sessionId(sessionId)
                 .messageType(VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY)
                 .build());
         row.setAiGeneratedText(summary);
@@ -369,7 +365,8 @@ public class VoiceInterviewService {
     /**
      * Get conversation history as DTOs (for frontend)
      */
-    public List<VoiceInterviewMessageDTO> getConversationHistoryDTO(String sessionId) {
+    public List<VoiceInterviewMessageDTO> getConversationHistoryDTO(Long userId, Long sessionId) {
+        requireOwnedSession(userId, sessionId);
         return getConversationHistory(sessionId).stream()
             .map(msg -> VoiceInterviewMessageDTO.builder()
                 .id(msg.getId())
@@ -392,12 +389,21 @@ public class VoiceInterviewService {
      * @param reason Pause reason (user_initiated or timeout)
      */
     @Transactional
-    public void pauseSession(String sessionId, String reason) {
-        Long sessionIdLong = parseSessionId(sessionId);
+    public void pauseSession(Long sessionId, String reason) {
 
-        VoiceInterviewSessionEntity session = sessionRepository.findById(sessionIdLong)
+        VoiceInterviewSessionEntity session = sessionRepository.findById(sessionId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
+        pauseSession(session, reason);
+    }
 
+    @Transactional
+    public void pauseSession(Long userId, Long sessionId, String reason) {
+        VoiceInterviewSessionEntity session = sessionRepository.findByIdAndUserId(sessionId, userId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
+        pauseSession(session, reason);
+    }
+
+    private void pauseSession(VoiceInterviewSessionEntity session, String reason) {
         if (session.getStatus() != VoiceInterviewSessionStatus.IN_PROGRESS) {
             throw new BusinessException(ErrorCode.BAD_REQUEST,
                 "会话状态为 " + session.getStatus() + "，无法暂停"
@@ -408,9 +414,9 @@ public class VoiceInterviewService {
         session.setPausedAt(LocalDateTime.now());
 
         sessionRepository.save(session);
-        invalidateSessionCache(sessionIdLong);
+        invalidateSessionCache(session.getId());
 
-        log.info("Session {} paused, reason: {}", sessionId, reason);
+        log.info("Session {} paused, reason: {}", session.getId(), reason);
     }
 
     /**
@@ -421,10 +427,8 @@ public class VoiceInterviewService {
      * @return SessionResponseDTO with WebSocket URL
      */
     @Transactional
-    public SessionResponseDTO resumeSession(String sessionId) {
-        Long sessionIdLong = parseSessionId(sessionId);
-
-        VoiceInterviewSessionEntity session = sessionRepository.findById(sessionIdLong)
+    public SessionResponseDTO resumeSession(Long userId, Long sessionId) {
+        VoiceInterviewSessionEntity session = sessionRepository.findByIdAndUserId(sessionId, userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在: " + sessionId));
 
         if (session.getStatus() != VoiceInterviewSessionStatus.PAUSED) {
@@ -440,7 +444,7 @@ public class VoiceInterviewService {
         cacheSession(saved);
 
         log.info("Session {} resumed with {} messages in conversation history",
-            sessionId, countDialogueMessages(sessionIdLong));
+            sessionId, countDialogueMessages(sessionId));
 
         return buildSessionResponse(saved);
     }
@@ -449,13 +453,11 @@ public class VoiceInterviewService {
      * Get all sessions for a user
      * 获取用户所有会话
      *
-     * @param userId User ID (optional, defaults to DEFAULT_USER_ID)
+     * @param userId 当前登录账号 ID
      * @param status Filter by status (optional)
      * @return List of session metadata
      */
-    public List<SessionMetaDTO> getAllSessions(String userId, String status) {
-        userId = userId != null ? userId : DEFAULT_USER_ID;
-
+    public List<SessionMetaDTO> getAllSessions(Long userId, String status) {
         List<VoiceInterviewSessionEntity> sessions;
         if (status != null && !status.isEmpty()) {
             VoiceInterviewSessionStatus statusEnum =
@@ -488,8 +490,8 @@ public class VoiceInterviewService {
      * @param sessionId Session ID as Long
      * @return SessionResponseDTO with session details or null if not found
      */
-    public SessionResponseDTO getSessionDTO(Long sessionId) {
-        VoiceInterviewSessionEntity session = getSession(sessionId);
+    public SessionResponseDTO getSessionDTO(Long userId, Long sessionId) {
+        VoiceInterviewSessionEntity session = findOwnedSession(userId, sessionId);
 
         if (session == null) {
             return null;
@@ -661,7 +663,7 @@ public class VoiceInterviewService {
     }
 
     private void sendEvaluateTaskAfterCommit(Long sessionId) {
-        Runnable sendTask = () -> voiceEvaluateStreamProducer.sendEvaluateTask(sessionId.toString());
+        Runnable sendTask = () -> voiceEvaluateStreamProducer.sendEvaluateTask(sessionId);
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             sendTask.run();
             return;
@@ -679,13 +681,14 @@ public class VoiceInterviewService {
      * 删除语音面试会话及其关联的消息和评估记录
      */
     @Transactional
-    public void deleteSession(Long sessionId) {
-        if (!sessionRepository.existsById(sessionId)) {
+    public void deleteSession(Long userId, Long sessionId) {
+        if (!sessionRepository.existsByIdAndUserId(sessionId, userId)) {
             throw new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "会话不存在: " + sessionId);
         }
         evaluationRepository.findBySessionId(sessionId).ifPresent(evaluationRepository::delete);
         messageRepository.deleteBySessionId(sessionId);
         sessionRepository.deleteById(sessionId);
+        invalidateSessionCache(sessionId);
         log.info("Deleted voice interview session: {}", sessionId);
     }
 
@@ -714,21 +717,6 @@ public class VoiceInterviewService {
      */
     private String getSessionCacheKey(Long sessionId) {
         return SESSION_CACHE_KEY_PREFIX + sessionId;
-    }
-
-    /**
-     * Parse session ID from String to Long with error handling
-     */
-    private Long parseSessionId(String sessionId) {
-        if (sessionId == null) {
-            return null;
-        }
-        try {
-            return Long.parseLong(sessionId);
-        } catch (NumberFormatException e) {
-            log.error("Invalid session ID format: {}", sessionId, e);
-            return null;
-        }
     }
 
     /**

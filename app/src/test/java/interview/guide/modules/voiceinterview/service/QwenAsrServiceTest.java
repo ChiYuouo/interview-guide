@@ -57,7 +57,7 @@ class QwenAsrServiceTest {
     void testStartTranscription() throws Exception {
         asrService.init();
 
-        String sessionId = "test-session-1";
+        Long sessionId = 1L;
         AtomicReference<String> resultRef = new AtomicReference<>();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
 
@@ -79,7 +79,7 @@ class QwenAsrServiceTest {
     void testStopTranscription() throws Exception {
         asrService.init();
 
-        String sessionId = "test-session-2";
+        Long sessionId = 2L;
         CountDownLatch latch = new CountDownLatch(1);
 
         asrService.startTranscription(
@@ -100,8 +100,8 @@ class QwenAsrServiceTest {
     void testMultipleSessions() throws Exception {
         asrService.init();
 
-        String session1 = "session-1";
-        String session2 = "session-2";
+        Long session1 = 1L;
+        Long session2 = 2L;
 
         asrService.startTranscription(session1, text -> {}, error -> {});
         asrService.startTranscription(session2, text -> {}, error -> {});
@@ -124,7 +124,7 @@ class QwenAsrServiceTest {
         byte[] audioData = new byte[1024];
 
         assertThrows(IllegalStateException.class, () -> {
-            asrService.sendAudio("non-existent-session", audioData);
+            asrService.sendAudio(999L, audioData);
         });
     }
 
@@ -152,14 +152,14 @@ class QwenAsrServiceTest {
         asrService.init();
 
         // Create multiple sessions
-        asrService.startTranscription("session-1", text -> {}, error -> {});
-        asrService.startTranscription("session-2", text -> {}, error -> {});
+        asrService.startTranscription(1L, text -> {}, error -> {});
+        asrService.startTranscription(2L, text -> {}, error -> {});
 
         // Destroy should cleanup all sessions
         assertDoesNotThrow(() -> asrService.destroy());
 
-        assertFalse(asrService.hasActiveSession("session-1"));
-        assertFalse(asrService.hasActiveSession("session-2"));
+        assertFalse(asrService.hasActiveSession(1L));
+        assertFalse(asrService.hasActiveSession(2L));
     }
 
     @Test
@@ -230,9 +230,9 @@ class QwenAsrServiceTest {
             return sb.toString();
         }
 
-        private void invokeHandleServerEvent(String sessionId, JsonObject message) throws Exception {
+        private void invokeHandleServerEvent(Long sessionId, JsonObject message) throws Exception {
             Method method = QwenAsrService.class.getDeclaredMethod(
-                    "handleServerEvent", String.class, JsonObject.class,
+                    "handleServerEvent", Long.class, JsonObject.class,
                     Consumer.class, Consumer.class,
                     Consumer.class);
             method.setAccessible(true);
@@ -250,7 +250,7 @@ class QwenAsrServiceTest {
                     "{\"type\":\"conversation.item.input_audio_transcription.completed\","
                             + "\"transcript\":\"" + marker + "\",\"language\":\"zh\"}").getAsJsonObject();
 
-            invokeHandleServerEvent("sess-log-1", message);
+            invokeHandleServerEvent(1L, message);
 
                 assertTrue(capturedLogs().contains("textLength: " + marker.length()));
                 assertFalse(capturedLogs().contains(marker));
@@ -264,9 +264,9 @@ class QwenAsrServiceTest {
                     "{\"type\":\"conversation.item.input_audio_transcription.failed\","
                             + "\"transcript\":\"" + marker + "\"}").getAsJsonObject();
 
-            invokeHandleServerEvent("sess-log-2", message);
+            invokeHandleServerEvent(2L, message);
 
-                assertTrue(capturedLogs().contains("sess-log-2"));
+                assertTrue(capturedLogs().contains("[Session: 2]"));
                 assertFalse(capturedLogs().contains(marker));
         }
 
@@ -278,7 +278,7 @@ class QwenAsrServiceTest {
                     "{\"type\":\"conversation.item.input_audio_transcription.unknown\","
                             + "\"transcript\":\"" + marker + "\"}").getAsJsonObject();
 
-            invokeHandleServerEvent("sess-log-3", message);
+            invokeHandleServerEvent(3L, message);
 
                 assertTrue(capturedLogs().contains(
                         "conversation.item.input_audio_transcription.unknown"));

@@ -4,6 +4,7 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.dto.CreateSessionRequest;
 import interview.guide.modules.voiceinterview.dto.SessionResponseDTO;
+import interview.guide.modules.voiceinterview.listener.VoiceEvaluateStreamProducer;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewMessageEntity;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionStatus;
@@ -71,6 +72,9 @@ class VoiceInterviewServiceTest {
     @Mock
     private RBucket<VoiceInterviewSessionEntity> bucket;
 
+    @Mock
+    private VoiceEvaluateStreamProducer voiceEvaluateStreamProducer;
+
     @InjectMocks
     private VoiceInterviewService voiceInterviewService;
 
@@ -124,7 +128,7 @@ class VoiceInterviewServiceTest {
             when(sessionRepository.save(any(VoiceInterviewSessionEntity.class))).thenReturn(savedSession);
 
             // When
-            SessionResponseDTO response = voiceInterviewService.createSession(request);
+            SessionResponseDTO response = voiceInterviewService.createSession(1L, request);
 
             // Then
             assertNotNull(response);
@@ -161,7 +165,7 @@ class VoiceInterviewServiceTest {
             when(sessionRepository.save(any(VoiceInterviewSessionEntity.class))).thenReturn(savedSession);
 
             // When
-            SessionResponseDTO response = voiceInterviewService.createSession(request);
+            SessionResponseDTO response = voiceInterviewService.createSession(1L, request);
 
             // Then
             assertEquals("TECH", response.getCurrentPhase());
@@ -193,7 +197,7 @@ class VoiceInterviewServiceTest {
                     ArgumentCaptor.forClass(VoiceInterviewSessionEntity.class);
             when(sessionRepository.save(captor.capture())).thenReturn(savedSession);
 
-            voiceInterviewService.createSession(request);
+            voiceInterviewService.createSession(1L, request);
 
             // Then
             VoiceInterviewSessionEntity captured = captor.getValue();
@@ -215,6 +219,7 @@ class VoiceInterviewServiceTest {
             LocalDateTime startTime = LocalDateTime.now().minusMinutes(10);
             VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
                     .id(sessionId)
+                    .userId(1L)
                     .roleType("ali-p8")
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH)
                     .status(VoiceInterviewSessionStatus.IN_PROGRESS)
@@ -222,11 +227,11 @@ class VoiceInterviewServiceTest {
                     .plannedDuration(30)
                     .build();
 
-            when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
+            when(sessionRepository.findByIdAndUserId(sessionId, 1L)).thenReturn(Optional.of(session));
             when(sessionRepository.save(any(VoiceInterviewSessionEntity.class))).thenReturn(session);
 
             // When
-            voiceInterviewService.endSession(sessionId.toString());
+            voiceInterviewService.endSession(1L, sessionId);
 
             // Then
             assertEquals(VoiceInterviewSessionEntity.InterviewPhase.COMPLETED, session.getCurrentPhase());
@@ -240,28 +245,28 @@ class VoiceInterviewServiceTest {
 
             verify(sessionRepository, times(1)).save(session);
             verify(bucket, times(1)).delete();
+            verify(voiceEvaluateStreamProducer).sendEvaluateTask(sessionId);
         }
 
         @Test
-        @DisplayName("结束不存在的会话 - 应静默处理")
+        @DisplayName("结束不存在的会话 - 返回业务错误")
         void testEndSession_NotFound() {
             // Given
             Long sessionId = 999L;
-            when(sessionRepository.findById(sessionId)).thenReturn(Optional.empty());
+            when(sessionRepository.findByIdAndUserId(sessionId, 1L)).thenReturn(Optional.empty());
 
-            // When & Then - 不应抛出异常
-            assertDoesNotThrow(() -> voiceInterviewService.endSession(sessionId.toString()));
+            assertThrows(BusinessException.class, () -> voiceInterviewService.endSession(1L, sessionId));
 
             verify(sessionRepository, never()).save(any());
         }
 
         @Test
-        @DisplayName("结束会话 - 无效ID格式")
-        void testEndSession_InvalidId() {
-            // When & Then
-            assertDoesNotThrow(() -> voiceInterviewService.endSession("invalid"));
+        @DisplayName("结束其他账号缓存中的会话会被拒绝")
+        void testEndSession_ForeignCachedSession() {
+            when(bucket.get()).thenReturn(VoiceInterviewSessionEntity.builder().id(1L).userId(2L).build());
 
-            verify(sessionRepository, never()).findById(any());
+            assertThrows(BusinessException.class, () -> voiceInterviewService.endSession(1L, 1L));
+
             verify(sessionRepository, never()).save(any());
         }
     }
@@ -291,12 +296,12 @@ class VoiceInterviewServiceTest {
                     createMessage(sessionId, 2, "AI：你好，请自我介绍")
             );
 
-            when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(pausedSession));
+            when(sessionRepository.findByIdAndUserId(sessionId, 1L)).thenReturn(Optional.of(pausedSession));
             when(sessionRepository.save(any(VoiceInterviewSessionEntity.class))).thenReturn(pausedSession);
             when(messageRepository.findBySessionIdOrderBySequenceNumAsc(sessionId)).thenReturn(history);
 
             // When
-            SessionResponseDTO response = voiceInterviewService.resumeSession(sessionId.toString());
+            SessionResponseDTO response = voiceInterviewService.resumeSession(1L, sessionId);
 
             // Then
             assertNotNull(response);
@@ -322,11 +327,11 @@ class VoiceInterviewServiceTest {
                     .status(VoiceInterviewSessionStatus.IN_PROGRESS)
                     .build();
 
-            when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(inProgressSession));
+            when(sessionRepository.findByIdAndUserId(sessionId, 1L)).thenReturn(Optional.of(inProgressSession));
 
             // When & Then
             assertThrows(BusinessException.class, () ->
-                    voiceInterviewService.resumeSession(sessionId.toString())
+                    voiceInterviewService.resumeSession(1L, sessionId)
             );
 
             verify(sessionRepository, never()).save(any());
@@ -337,11 +342,11 @@ class VoiceInterviewServiceTest {
         void testResumeSession_SessionNotFound() {
             // Given
             Long sessionId = 999L;
-            when(sessionRepository.findById(sessionId)).thenReturn(Optional.empty());
+            when(sessionRepository.findByIdAndUserId(sessionId, 1L)).thenReturn(Optional.empty());
 
             // When & Then
             assertThrows(BusinessException.class, () ->
-                    voiceInterviewService.resumeSession(sessionId.toString())
+                    voiceInterviewService.resumeSession(1L, sessionId)
             );
         }
 
@@ -373,7 +378,7 @@ class VoiceInterviewServiceTest {
             when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
 
             // When
-            voiceInterviewService.startPhase(sessionId.toString(), "TECH");
+            voiceInterviewService.startPhase(sessionId, "TECH");
 
             // Then
             assertEquals(VoiceInterviewSessionEntity.InterviewPhase.TECH, session.getCurrentPhase());
@@ -394,7 +399,7 @@ class VoiceInterviewServiceTest {
             when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
 
             // When
-            voiceInterviewService.startPhase(sessionId.toString(), "INVALID_PHASE");
+            voiceInterviewService.startPhase(sessionId, "INVALID_PHASE");
 
             // Then - 阶段不应改变
             assertEquals(VoiceInterviewSessionEntity.InterviewPhase.INTRO, session.getCurrentPhase());
@@ -494,7 +499,7 @@ class VoiceInterviewServiceTest {
                     ));
 
             // When
-            voiceInterviewService.saveMessage(sessionId.toString(), userText, aiText);
+            voiceInterviewService.saveMessage(sessionId, userText, aiText);
 
             // Then
             ArgumentCaptor<VoiceInterviewMessageEntity> captor =
@@ -544,7 +549,7 @@ class VoiceInterviewServiceTest {
 
             // When
             List<VoiceInterviewMessageEntity> result =
-                    voiceInterviewService.getConversationHistory(sessionId.toString());
+                    voiceInterviewService.getConversationHistory(sessionId);
 
             // Then
             assertEquals(3, result.size());
@@ -562,7 +567,7 @@ class VoiceInterviewServiceTest {
 
             // When & Then
             assertDoesNotThrow(() ->
-                    voiceInterviewService.saveMessage(sessionId.toString(), "user", "ai")
+                    voiceInterviewService.saveMessage(sessionId, "user", "ai")
             );
 
             verify(messageRepository, never()).save(any());
@@ -629,7 +634,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("获取会话 - null ID")
         void testGetSession_NullId() {
             // When
-            VoiceInterviewSessionEntity result = voiceInterviewService.getSession((Long) null);
+            VoiceInterviewSessionEntity result = voiceInterviewService.getSession(null);
 
             // Then
             assertNull(result);
@@ -644,6 +649,7 @@ class VoiceInterviewServiceTest {
             Long sessionId = 1L;
             VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
                     .id(sessionId)
+                    .userId(1L)
                     .roleType("tencent-backend")
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.HR)
                     .status(VoiceInterviewSessionStatus.IN_PROGRESS)
@@ -654,7 +660,7 @@ class VoiceInterviewServiceTest {
             when(bucket.get()).thenReturn(session);
 
             // When
-            SessionResponseDTO dto = voiceInterviewService.getSessionDTO(sessionId);
+            SessionResponseDTO dto = voiceInterviewService.getSessionDTO(1L, sessionId);
 
             // Then
             assertNotNull(dto);
@@ -808,23 +814,10 @@ class VoiceInterviewServiceTest {
 
             // When
             VoiceInterviewSessionEntity.InterviewPhase phase =
-                    voiceInterviewService.getCurrentPhase("999");
+                    voiceInterviewService.getCurrentPhase(999L);
 
             // Then
             assertNull(phase);
-        }
-
-        @Test
-        @DisplayName("解析会话ID - 无效格式")
-        void testParseSessionId_InvalidFormat() {
-            // Given
-            String invalidId = "abc123";
-
-            // When
-            VoiceInterviewSessionEntity result = voiceInterviewService.getSession(invalidId);
-
-            // Then
-            assertNull(result);
         }
 
         @Test

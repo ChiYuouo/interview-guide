@@ -20,6 +20,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -85,14 +86,14 @@ class VoiceHistoryLoaderTest {
   @DisplayName("万条消息：单次加载从不全量读取，Pageable 大小不超过窗口+批次")
   void boundedReadsOnly() {
     stubWindow(9981, 20);   // 最近窗口 9981..10000
-    when(interviewService.loadSummaryRow("1")).thenReturn(Optional.of(summaryRow(-1, 9980)));
+    when(interviewService.loadSummaryRow(1L)).thenReturn(Optional.of(summaryRow(-1, 9980)));
     when(messageRepository.findBySessionIdAndMessageTypeNotAndSequenceNumGreaterThanAndSequenceNumLessThanOrderBySequenceNumAsc(
         any(), anyString(), eq(9980), eq(9981), any(Pageable.class))).thenReturn(List.of());
     when(compressor.compress(any(), anyString(), eq(0), isNull()))
         .thenReturn(new VoiceContextCompressor.CompressedHistory("已有摘要", List.of(), 0, false));
     when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题10000"));
 
-    List<String> history = loader.loadHistory("1", null);
+    List<String> history = loader.loadHistory(1L, null);
 
     assertThat(history).isNotEmpty();
     // 从不调用全量读取
@@ -109,7 +110,7 @@ class VoiceHistoryLoaderTest {
   @DisplayName("压缩成功推进边界：saveSummaryRow 收到单调递增的真实 sequenceNum")
   void advancesBoundaryWithRealSequenceNum() {
     stubWindow(31, 20);   // 窗口 31..50
-    when(interviewService.loadSummaryRow("1")).thenReturn(Optional.of(summaryRow(-1, 20)));
+    when(interviewService.loadSummaryRow(1L)).thenReturn(Optional.of(summaryRow(-1, 20)));
     // pending 21..30（10 条，恰好一个批次）
     when(messageRepository.findBySessionIdAndMessageTypeNotAndSequenceNumGreaterThanAndSequenceNumLessThanOrderBySequenceNumAsc(
         any(), anyString(), eq(20), eq(31), any(Pageable.class)))
@@ -119,10 +120,10 @@ class VoiceHistoryLoaderTest {
         .thenReturn(new VoiceContextCompressor.CompressedHistory("新摘要", List.of(), 10, true));
     when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题50"));
 
-    loader.loadHistory("1", null);
+    loader.loadHistory(1L, null);
 
     // 新边界 = turns.get(9).sequenceNum = 30（pending 最后一条）
-    verify(interviewService).saveSummaryRow("1", "新摘要", 30);
+    verify(interviewService).saveSummaryRow(1L, "新摘要", 30);
   }
 
   @Test
@@ -130,7 +131,7 @@ class VoiceHistoryLoaderTest {
   void migratesLegacyBoundaryByOffsetLookup() {
     stubWindow(17, 20);
     // 旧编码：sequenceNum=-16 → coveredTurns=15
-    when(interviewService.loadSummaryRow("1")).thenReturn(Optional.of(summaryRow(-16, null)));
+    when(interviewService.loadSummaryRow(1L)).thenReturn(Optional.of(summaryRow(-16, null)));
     when(messageRepository.findBySessionIdAndMessageTypeNotOrderBySequenceNumAsc(
         any(), anyString(), any(Pageable.class))).thenReturn(List.of(msg(15)));
     when(messageRepository.findBySessionIdAndMessageTypeNotAndSequenceNumGreaterThanAndSequenceNumLessThanOrderBySequenceNumAsc(
@@ -139,7 +140,7 @@ class VoiceHistoryLoaderTest {
         .thenReturn(new VoiceContextCompressor.CompressedHistory("已有摘要", List.of(), 0, false));
     when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题36"));
 
-    loader.loadHistory("1", null);
+    loader.loadHistory(1L, null);
 
     // 迁移定位：OFFSET 14, LIMIT 1
     ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
@@ -147,7 +148,7 @@ class VoiceHistoryLoaderTest {
         any(), anyString(), captor.capture());
     assertThat(captor.getValue().getOffset()).isEqualTo(14);
     assertThat(captor.getValue().getPageSize()).isEqualTo(1);
-    verify(interviewService).saveSummaryRow("1", "已有摘要", 15);
+    verify(interviewService).saveSummaryRow(1L, "已有摘要", 15);
     // 全量读取从未发生
     verify(messageRepository, never())
         .findBySessionIdAndMessageTypeNotOrderBySequenceNumAsc(any(), anyString());
@@ -156,11 +157,11 @@ class VoiceHistoryLoaderTest {
   @Test
   @DisplayName("摘要/加载失败：降级为最近窗口，查询量仍有界且不恢复全量")
   void fallsBackToWindowOnFailure() {
-    when(interviewService.loadSummaryRow("1")).thenThrow(new RuntimeException("db down"));
+    when(interviewService.loadSummaryRow(1L)).thenThrow(new RuntimeException("db down"));
     stubWindow(81, 20);
     when(compressor.formatRecentWithinBudget(any())).thenReturn(List.of("面试官：问题100"));
 
-    List<String> history = loader.loadHistory("1", null);
+    List<String> history = loader.loadHistory(1L, null);
 
     assertThat(history).containsExactly("面试官：问题100");
     verify(messageRepository, never())
@@ -175,13 +176,13 @@ class VoiceHistoryLoaderTest {
   @DisplayName("enabled=false 保留全量分支（仅本地排查）")
   void uncompressedBranchWhenDisabled() {
     properties.getContextCompression().setEnabled(false);
-    when(interviewService.getConversationHistory("1")).thenReturn(List.of(msg(1)));
+    when(interviewService.getConversationHistory(1L)).thenReturn(List.of(msg(1)));
     when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题1"));
 
-    List<String> history = loader.loadHistory("1", null);
+    List<String> history = loader.loadHistory(1L, null);
 
     assertThat(history).containsExactly("面试官：问题1");
-    verify(interviewService).getConversationHistory("1");
+    verify(interviewService).getConversationHistory(1L);
     verify(messageRepository, never())
         .findBySessionIdAndMessageTypeNotOrderBySequenceNumDesc(any(), anyString(), any(Pageable.class));
   }
@@ -194,25 +195,25 @@ class VoiceHistoryLoaderTest {
     @DisplayName("新会话（窗口内）：只查窗口，不查待摘要段，不持久化")
     void newSessionWindowOnly() {
       stubWindow(1, 5);
-      when(interviewService.loadSummaryRow("1")).thenReturn(Optional.empty());
+      when(interviewService.loadSummaryRow(1L)).thenReturn(Optional.empty());
       when(compressor.compress(any(), isNull(), eq(0), isNull()))
           .thenReturn(new VoiceContextCompressor.CompressedHistory(null, List.of(), 0, false));
       when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题5"));
 
-      List<String> history = loader.loadHistory("1", null);
+      List<String> history = loader.loadHistory(1L, null);
 
       assertThat(history).containsExactly("面试官：问题5");
       verify(messageRepository, never())
           .findBySessionIdAndMessageTypeNotAndSequenceNumGreaterThanAndSequenceNumLessThanOrderBySequenceNumAsc(
               any(), anyString(), anyInt(), anyInt(), any(Pageable.class));
-      verify(interviewService, never()).saveSummaryRow(anyString(), anyString(), anyInt());
+      verify(interviewService, never()).saveSummaryRow(anyLong(), anyString(), anyInt());
     }
 
     @Test
     @DisplayName("旧长会话无 SUMMARY：covered=0 查待摘要段，每轮增量追上")
     void legacyLongSessionWithoutSummaryCatchesUpIncrementally() {
       stubWindow(31, 20);   // 窗口 31..50，之前 1..30 未摘要
-      when(interviewService.loadSummaryRow("1")).thenReturn(Optional.empty());
+      when(interviewService.loadSummaryRow(1L)).thenReturn(Optional.empty());
       when(messageRepository.findBySessionIdAndMessageTypeNotAndSequenceNumGreaterThanAndSequenceNumLessThanOrderBySequenceNumAsc(
           any(), anyString(), eq(0), eq(31), any(Pageable.class)))
           .thenReturn(java.util.stream.IntStream.rangeClosed(1, 10).mapToObj(i -> msg(i * 3)).toList());
@@ -220,10 +221,10 @@ class VoiceHistoryLoaderTest {
           .thenReturn(new VoiceContextCompressor.CompressedHistory("首批摘要", List.of(), 10, true));
       when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题50"));
 
-      loader.loadHistory("1", null);
+      loader.loadHistory(1L, null);
 
       // 首批摘要边界 = pending 最后一条的 sequenceNum = 30
-      verify(interviewService).saveSummaryRow(eq("1"), eq("首批摘要"), eq(30));
+      verify(interviewService).saveSummaryRow(eq(1L), eq("首批摘要"), eq(30));
       verify(messageRepository, never())
           .findBySessionIdAndMessageTypeNotOrderBySequenceNumAsc(any(), anyString());
     }

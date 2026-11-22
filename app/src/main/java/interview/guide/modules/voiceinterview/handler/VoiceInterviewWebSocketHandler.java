@@ -2,12 +2,15 @@ package interview.guide.modules.voiceinterview.handler;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import io.micrometer.core.instrument.MeterRegistry;
 import interview.guide.modules.voiceinterview.dto.WebSocketControlMessage;
 import interview.guide.modules.voiceinterview.dto.WebSocketSubtitleMessage;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewMessageEntity;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
+import interview.guide.modules.voiceinterview.config.VoiceInterviewHandshakeInterceptor;
 import interview.guide.modules.voiceinterview.context.VoiceContextCompressor;
 import interview.guide.modules.voiceinterview.service.QwenAsrService;
 import interview.guide.modules.voiceinterview.service.QwenTtsService;
@@ -77,13 +80,13 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
      */
     private final ExecutorService voicePipelineExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
-    private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
-    private final Map<String, SessionState> sessionStates = new ConcurrentHashMap<>();
+    private final Map<Long, WebSocketSession> sessions = new ConcurrentHashMap<>();
+    private final Map<Long, SessionState> sessionStates = new ConcurrentHashMap<>();
     private final Map<String, byte[]> openingAudioCache = new ConcurrentHashMap<>();
 
     // Activity tracking for pause timeout
     // 活动跟踪（用于暂停超时）
-    private final Map<String, Long> lastActivityTime = new ConcurrentHashMap<>();
+    private final Map<Long, Long> lastActivityTime = new ConcurrentHashMap<>();
     private static final long WARNING_TIME_MS = (long) (4.5 * 60 * 1000);  // 4:30
     private static final long PAUSE_TIMEOUT_MS = 5 * 60 * 1000;            // 5:00
     private static final int WS_SEND_TIME_LIMIT_MS = 10_000;
@@ -148,7 +151,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        String sessionId = extractSessionId(session);
+        Long sessionId = getSessionId(session);
 
         // Increase message size limits for audio streaming
         // 1 second of PCM audio @ 16kHz, 16-bit = ~32KB raw, ~42KB base64
@@ -215,14 +218,14 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
         }
     }
 
-    private void triggerOpeningQuestionIfNeeded(String sessionId, WebSocketSession session) {
+    private void triggerOpeningQuestionIfNeeded(Long sessionId, WebSocketSession session) {
         voicePipelineExecutor.execute(() -> {
             try {
                 if (session == null || !session.isOpen()) {
                     return;
                 }
 
-                VoiceInterviewSessionEntity sessionEntity = getSessionEntity(sessionId);
+                VoiceInterviewSessionEntity sessionEntity = interviewService.getSession(sessionId);
                 if (sessionEntity == null) {
                     log.warn("Session entity not found when sending opening question: {}", sessionId);
                     return;
@@ -308,7 +311,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        String sessionId = extractSessionId(session);
+        Long sessionId = getSessionId(session);
 
         try {
             JsonNode msg = objectMapper.readTree(message.getPayload());
@@ -341,7 +344,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                     break;
                 case "control":
                     try {
-                        handleControl(sessionId, objectMapper.treeToValue(msg, WebSocketControlMessage.class));
+                        handleControl(session, sessionId, objectMapper.treeToValue(msg, WebSocketControlMessage.class));
                     } catch (Exception e) {
                         log.error("Error handling control message for session {}", sessionId, e);
                         sendError(session, "控制消息处理失败: " + e.getMessage());
@@ -372,7 +375,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
-        String sessionId = extractSessionId(session);
+        Long sessionId = getSessionId(session);
         try {
             sessions.remove(sessionId);
             SessionState removedState = sessionStates.remove(sessionId);
@@ -401,7 +404,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
-        log.error("WebSocket transport error for session {}", extractSessionId(session), exception);
+        log.error("WebSocket transport error for session {}", getSessionId(session), exception);
     }
 
     /** 无会话、append 失败等均可重连 ASR */
@@ -418,7 +421,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
         return m != null && m.contains("ASR session not ready");
     }
 
-    private void startDashScopeStt(String sessionId, WebSocketSession session) {
+    private void startDashScopeStt(Long sessionId, WebSocketSession session) {
         sttService.startTranscription(
                 sessionId,
                 text -> handleSttResult(sessionId, text, true),
@@ -433,7 +436,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
         scheduleAsrReadyCheck(sessionId, session, 0);
     }
 
-    private void scheduleAsrReadyCheck(String sessionId, WebSocketSession session, int retryCount) {
+    private void scheduleAsrReadyCheck(Long sessionId, WebSocketSession session, int retryCount) {
         utteranceMergeScheduler.schedule(
             () -> checkAsrReadyOrRetry(sessionId, session, retryCount),
             ASR_READY_CHECK_DELAY_SECONDS,
@@ -441,7 +444,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
         );
     }
 
-    private void checkAsrReadyOrRetry(String sessionId, WebSocketSession session, int retryCount) {
+    private void checkAsrReadyOrRetry(Long sessionId, WebSocketSession session, int retryCount) {
         if (session == null || !session.isOpen() || sttService.isReady(sessionId)) {
             return;
         }
@@ -463,7 +466,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     /**
      * DashScope ASR 断线后重连（回调与首次 start 一致）
      */
-    private void restartDashScopeStt(String sessionId) {
+    private void restartDashScopeStt(Long sessionId) {
         WebSocketSession session = sessions.get(sessionId);
         if (session == null || !session.isOpen()) {
             return;
@@ -484,7 +487,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
      * Handle user audio message
      * Just send audio to STT transcriber (results come via callback)
      */
-    private void handleUserAudio(String sessionId, String base64Audio) {
+    private void handleUserAudio(Long sessionId, String base64Audio) {
         WebSocketSession session = sessions.get(sessionId);
         if (session == null) {
             log.warn("Session not found: {}", sessionId);
@@ -546,7 +549,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     /**
      * Handle STT result from callback (partial = live; final = committed segment for LLM).
      */
-    private void handleSttResult(String sessionId, String recognizedText, boolean isFinalSegment) {
+    private void handleSttResult(Long sessionId, String recognizedText, boolean isFinalSegment) {
         WebSocketSession session = sessions.get(sessionId);
         SessionState state = sessionStates.get(sessionId);
 
@@ -579,7 +582,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     /**
      * 手动提交：获取 mergeBuffer 中累积的用户文本并触发 LLM 管线。
      */
-    private void flushMergedUtteranceToLlm(String sessionId) {
+    private void flushMergedUtteranceToLlm(Long sessionId) {
         WebSocketSession session = sessions.get(sessionId);
         SessionState state = sessionStates.get(sessionId);
         if (session == null || state == null || !session.isOpen()) {
@@ -622,7 +625,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
      * When streaming is enabled, uses sentence-level TTS overlap: each detected sentence
      * triggers a concurrent TTS call, so TTS runs in parallel with the rest of LLM generation.
      */
-    private void triggerLlmResponse(String sessionId, WebSocketSession session, SessionState state) {
+    private void triggerLlmResponse(Long sessionId, WebSocketSession session, SessionState state) {
         long turnStartNanos = System.nanoTime();
         state.aiSpeaking.set(true);
         try {
@@ -639,7 +642,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
             log.info("Getting LLM response for session {}, textLength={}", sessionId, userText.length());
 
-            VoiceInterviewSessionEntity sessionEntity = getSessionEntity(sessionId);
+            VoiceInterviewSessionEntity sessionEntity = interviewService.getSession(sessionId);
             if (sessionEntity == null) {
                 log.error("Session entity not found for session {}, cannot generate LLM response", sessionId);
                 sendError(session, "会话不存在，请重新开始面试");
@@ -873,7 +876,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     /**
      * Handle control message (end_interview, start_phase)
      */
-    private void handleControl(String sessionId, WebSocketControlMessage control) {
+    private void handleControl(WebSocketSession socket, Long sessionId, WebSocketControlMessage control) {
         log.info("Control message for session {}: action={}, phase={}",
                 sessionId, control.getAction(), control.getPhase());
 
@@ -891,7 +894,10 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                 flushMergedUtteranceToLlm(sessionId);
                 break;
             case "end_interview":
-                interviewService.endSession(sessionId);
+                if (!(socket.getAttributes().get(VoiceInterviewHandshakeInterceptor.USER_ID_ATTRIBUTE) instanceof Long userId)) {
+                    throw new BusinessException(ErrorCode.FORBIDDEN);
+                }
+                interviewService.endSession(userId, sessionId);
                 break;
             case "start_phase":
                 interviewService.startPhase(sessionId, control.getPhase());
@@ -982,7 +988,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
     private class OrderedTtsChunkEmitter {
 
-        private final String sessionId;
+        private final Long sessionId;
         private final WebSocketSession session;
         private final Semaphore ttsSemaphore;
         private final long ttsTimeoutSec;
@@ -994,7 +1000,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
         private volatile int totalChunks = -1;
 
         OrderedTtsChunkEmitter(
-                String sessionId,
+                Long sessionId,
                 WebSocketSession session,
                 Semaphore ttsSemaphore,
                 long ttsTimeoutSec) {
@@ -1166,7 +1172,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
      * Send pause warning notification
      * 发送暂停警告通知
      */
-    private void sendPauseWarning(String sessionId) {
+    private void sendPauseWarning(Long sessionId) {
         WebSocketSession session = sessions.get(sessionId);
         if (session != null && session.isOpen()) {
             sendMessage(session, toJson(Map.of(
@@ -1182,7 +1188,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
      * Handle pause timeout - save state and disconnect
      * 处理暂停超时 - 保存状态并断开连接
      */
-    private void handlePauseTimeout(String sessionId) {
+    private void handlePauseTimeout(Long sessionId) {
         WebSocketSession session = sessions.get(sessionId);
 
         try {
@@ -1216,13 +1222,9 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
         }
     }
 
-    /**
-     * Extract session ID from WebSocket URI path
-     * Path format: /ws/voice-interview/{sessionId}
-     */
-    private String extractSessionId(WebSocketSession session) {
-        String path = session.getUri().getPath();
-        return path.substring(path.lastIndexOf('/') + 1);
+    private Long getSessionId(WebSocketSession session) {
+        return (Long) session.getAttributes()
+            .get(VoiceInterviewHandshakeInterceptor.SESSION_ID_ATTRIBUTE);
     }
 
     /**
@@ -1230,7 +1232,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
      * 加载对话历史并进行上下文压缩（滑动窗口 + 可选增量摘要），再格式化为文本行。
      * 当 contextCompression.enabled=false 时行为与改前完全一致（返回全量格式化轮次）。
      */
-    private List<String> getHistory(String sessionId, String llmProvider) {
+    private List<String> getHistory(Long sessionId, String llmProvider) {
         try {
             List<String> history = voiceHistoryLoader.loadHistory(sessionId, llmProvider);
             log.debug("Loaded {} compressed history entries for session {}", history.size(), sessionId);
@@ -1242,22 +1244,9 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     }
 
     /**
-     * Get session entity from database
-     */
-    private VoiceInterviewSessionEntity getSessionEntity(String sessionId) {
-        try {
-            Long sessionIdLong = Long.parseLong(sessionId);
-            return interviewService.getSession(sessionIdLong);
-        } catch (NumberFormatException e) {
-            log.error("Invalid session ID format: {}", sessionId);
-            return null;
-        }
-    }
-
-    /**
      * Save message to database
      */
-    private void saveMessage(String sessionId, String userText, String aiText) {
+    private void saveMessage(Long sessionId, String userText, String aiText) {
         try {
             interviewService.saveMessage(sessionId, userText, aiText);
             log.debug("Message saved to database for session: {}", sessionId);

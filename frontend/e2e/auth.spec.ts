@@ -48,7 +48,7 @@ test('登录后返回原页面，刷新保持会话，退出后重新要求登�
   await expect(page.getByRole('heading', { name: '登录面试工作台' })).toBeVisible();
 });
 
-test('普通账号可以打开简历和文字面试，受限页面返回日程', async ({ page }) => {
+test('普通账号可以打开简历和模拟面试，受限页面返回日程', async ({ page }) => {
   await page.route('**/api/auth/session', route => route.fulfill({
     json: { code: 200, message: 'success', data: { username: 'trial', admin: false } },
   }));
@@ -59,6 +59,9 @@ test('普通账号可以打开简历和文字面试，受限页面返回日程',
     json: { code: 200, message: 'success', data: [] },
   }));
   await page.route('**/api/interview/**', route => route.fulfill({
+    json: { code: 200, message: 'success', data: [] },
+  }));
+  await page.route('**/api/voice-interview/sessions**', route => route.fulfill({
     json: { code: 200, message: 'success', data: [] },
   }));
 
@@ -72,10 +75,11 @@ test('普通账号可以打开简历和文字面试，受限页面返回日程',
   await page.getByRole('button', { name: '模拟面试' }).click();
   await expect(page).toHaveURL(/\/interview-hub$/);
   await expect(page.getByRole('button', { name: '开始文字面试' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /语音面试/ })).toHaveCount(0);
+  await page.getByRole('button', { name: /^语音面试/ }).click();
+  await expect(page.getByRole('button', { name: '开始语音面试' })).toBeVisible();
   await page.getByRole('link', { name: /面试记录/ }).click();
   await expect(page).toHaveURL(/\/interviews$/);
-  await expect(page.getByRole('button', { name: /语音面试/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '语音面试', exact: true })).toBeVisible();
   await page.goto('/voice-interview');
-  await expect(page).toHaveURL(/\/interview-schedule$/);
+  await expect(page).toHaveURL(/\/voice-interview$/);
 });

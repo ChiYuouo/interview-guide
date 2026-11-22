@@ -17,7 +17,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public class VoiceEvaluateStreamProducer extends AbstractStreamProducer<String> {
+public class VoiceEvaluateStreamProducer extends AbstractStreamProducer<Long> {
 
     private final VoiceInterviewService voiceInterviewService;
     private final TransactionalExecutor transactionalExecutor;
@@ -30,7 +30,7 @@ public class VoiceEvaluateStreamProducer extends AbstractStreamProducer<String> 
         this.transactionalExecutor = transactionalExecutor;
     }
 
-    public void sendEvaluateTask(String sessionId) {
+    public void sendEvaluateTask(Long sessionId) {
         sendTask(sessionId);
     }
 
@@ -45,21 +45,21 @@ public class VoiceEvaluateStreamProducer extends AbstractStreamProducer<String> 
     }
 
     @Override
-    protected Map<String, String> buildMessage(String sessionId) {
+    protected Map<String, String> buildMessage(Long sessionId) {
         return Map.of(
-            AsyncTaskStreamConstants.FIELD_VOICE_SESSION_ID, sessionId,
+            AsyncTaskStreamConstants.FIELD_VOICE_SESSION_ID, sessionId.toString(),
             AsyncTaskStreamConstants.FIELD_RETRY_COUNT, "0"
         );
     }
 
     @Override
-    protected String payloadIdentifier(String sessionId) {
+    protected String payloadIdentifier(Long sessionId) {
         return "voiceSessionId=" + sessionId;
     }
 
     @Override
-    protected void onSendFailed(String sessionId, String error) {
+    protected void onSendFailed(Long sessionId, String error) {
         transactionalExecutor.runRequiresNew(() -> voiceInterviewService.updateEvaluateStatus(
-            Long.parseLong(sessionId), AsyncTaskStatus.FAILED, truncateError(error)));
+            sessionId, AsyncTaskStatus.FAILED, truncateError(error)));
     }
 }

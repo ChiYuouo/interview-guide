@@ -28,11 +28,12 @@ class VoiceInterviewSessionUrlTest {
     when(redissonClient.<VoiceInterviewSessionEntity>getBucket(anyString())).thenReturn(bucket);
     when(bucket.get()).thenReturn(VoiceInterviewSessionEntity.builder()
         .id(42L)
+        .userId(1L)
         .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH)
         .status(VoiceInterviewSessionStatus.IN_PROGRESS)
         .build());
 
-    assertThat(service.getSessionDTO(42L).getWebSocketUrl())
+    assertThat(service.getSessionDTO(1L, 42L).getWebSocketUrl())
         .isEqualTo("/ws/voice-interview/42");
   }
 }

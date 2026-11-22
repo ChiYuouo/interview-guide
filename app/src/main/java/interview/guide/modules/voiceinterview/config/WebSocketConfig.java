@@ -17,12 +17,13 @@ import org.springframework.web.socket.server.support.HttpSessionHandshakeInterce
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final VoiceInterviewWebSocketHandler voiceInterviewWebSocketHandler;
+    private final VoiceInterviewHandshakeInterceptor ownershipInterceptor;
     private final CorsProperties corsProperties;
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(voiceInterviewWebSocketHandler, "/ws/voice-interview/{sessionId}")
-                .addInterceptors(new HttpSessionHandshakeInterceptor())
+                .addInterceptors(ownershipInterceptor, new HttpSessionHandshakeInterceptor())
                 .setAllowedOrigins(corsProperties.getAllowedOrigins().split(","));
     }
 

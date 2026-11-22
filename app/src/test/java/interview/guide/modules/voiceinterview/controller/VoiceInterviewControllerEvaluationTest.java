@@ -2,6 +2,9 @@ package interview.guide.modules.voiceinterview.controller;
 
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.result.Result;
+import interview.guide.modules.auth.model.AccountPrincipal;
+import interview.guide.modules.auth.model.AccountRole;
+import interview.guide.modules.auth.model.UserAccountEntity;
 import interview.guide.modules.voiceinterview.dto.VoiceEvaluationStatusDTO;
 import interview.guide.modules.voiceinterview.listener.VoiceEvaluateStreamProducer;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
@@ -25,6 +28,8 @@ import static org.mockito.Mockito.when;
 @DisplayName("语音评估接口")
 class VoiceInterviewControllerEvaluationTest {
 
+    private final AccountPrincipal account = createAccount();
+
     @Mock
     private VoiceInterviewService voiceInterviewService;
 
@@ -46,9 +51,9 @@ class VoiceInterviewControllerEvaluationTest {
             .evaluateStatus(AsyncTaskStatus.PENDING)
             .updatedAt(updatedAt)
             .build();
-        when(voiceInterviewService.getSession(1L)).thenReturn(session);
+        when(voiceInterviewService.requireOwnedSession(account.getUserId(), 1L)).thenReturn(session);
 
-        Result<VoiceEvaluationStatusDTO> result = controller.getEvaluation(1L);
+        Result<VoiceEvaluationStatusDTO> result = controller.getEvaluation(account, 1L);
 
         Field field = VoiceEvaluationStatusDTO.class.getDeclaredField("evaluateStatusUpdatedAt");
         field.setAccessible(true);
@@ -62,11 +67,20 @@ class VoiceInterviewControllerEvaluationTest {
             .id(2L)
             .evaluateStatus(AsyncTaskStatus.PENDING)
             .build();
-        when(voiceInterviewService.getSession(2L)).thenReturn(session);
+        when(voiceInterviewService.requireOwnedSession(account.getUserId(), 2L)).thenReturn(session);
 
-        Result<VoiceEvaluationStatusDTO> result = controller.generateEvaluation(2L);
+        Result<VoiceEvaluationStatusDTO> result = controller.generateEvaluation(account, 2L);
 
         assertThat(result.getData().getEvaluateStatus()).isEqualTo(AsyncTaskStatus.PENDING.name());
         verify(voiceInterviewService).triggerEvaluation(2L);
+    }
+
+    private static AccountPrincipal createAccount() {
+        var account = new UserAccountEntity();
+        account.setId(3L);
+        account.setUsername("candidate");
+        account.setPasswordHash("test-hash");
+        account.setRole(AccountRole.USER);
+        return new AccountPrincipal(account);
     }
 }

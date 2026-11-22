@@ -225,13 +225,9 @@ export const voiceInterviewApi = {
   /**
    * Get all sessions
    */
-  async getAllSessions(userId?: string, status?: string): Promise<SessionMeta[]> {
-    const params = new URLSearchParams();
-    if (userId) params.append('userId', userId);
-    if (status) params.append('status', status);
-
+  async getAllSessions(status?: string): Promise<SessionMeta[]> {
     return request.get<SessionMeta[]>(
-      `/api/voice-interview/sessions?${params.toString()}`
+      '/api/voice-interview/sessions', { params: { status } }
     );
   },
 

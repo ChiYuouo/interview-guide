@@ -23,6 +23,7 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -59,11 +60,11 @@ class VoiceContextSummaryProgressTest {
   void caughtUpSummaryRemainsInPrompt() {
     stubHistory(List.of());
 
-    List<String> history = loader.loadHistory("1", null);
+    List<String> history = loader.loadHistory(1L, null);
 
     assertThat(history.getFirst()).isEqualTo("【对话摘要】已有摘要");
     assertThat(String.join("\n", history)).contains("问题31", "问题50");
-    verify(service, never()).saveSummaryRow(anyString(), anyString(), anyInt());
+    verify(service, never()).saveSummaryRow(anyLong(), anyString(), anyInt());
     verifyNoInteractions(registry);
   }
 
@@ -75,9 +76,9 @@ class VoiceContextSummaryProgressTest {
     when(registry.getPlainChatClient()).thenReturn(client);
     when(client.prompt().user(anyString()).call().content()).thenReturn("已有摘要");
 
-    List<String> history = loader.loadHistory("1", null);
+    List<String> history = loader.loadHistory(1L, null);
 
-    verify(service).saveSummaryRow("1", "已有摘要", 30);
+    verify(service).saveSummaryRow(1L, "已有摘要", 30);
     assertThat(history.getFirst()).isEqualTo("【对话摘要】已有摘要");
     assertThat(String.join("\n", history)).contains("问题31").doesNotContain("问题21");
   }
@@ -117,7 +118,7 @@ class VoiceContextSummaryProgressTest {
     var summary = VoiceInterviewMessageEntity.builder()
         .sequenceNum(-1).messageType(VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY)
         .aiGeneratedText("已有摘要").summaryCoveredSequenceNum(boundary).build();
-    when(service.loadSummaryRow("1")).thenReturn(Optional.of(summary));
+    when(service.loadSummaryRow(1L)).thenReturn(Optional.of(summary));
     when(repository.findBySessionIdAndMessageTypeNotOrderBySequenceNumDesc(
         eq(1L), anyString(), any(Pageable.class)))
         .thenReturn(messages(31, 50).stream()

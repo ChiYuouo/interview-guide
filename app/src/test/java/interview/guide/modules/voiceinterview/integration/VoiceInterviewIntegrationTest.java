@@ -1,5 +1,6 @@
 package interview.guide.modules.voiceinterview.integration;
 
+import interview.guide.common.exception.BusinessException;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.dto.CreateSessionRequest;
 import interview.guide.modules.voiceinterview.dto.SessionResponseDTO;
@@ -69,7 +70,7 @@ class VoiceInterviewIntegrationTest {
                 .plannedDuration(30)
                 .build();
 
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(createRequest);
+            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(1L, createRequest);
 
             assertNotNull(sessionResponse);
             assertNotNull(sessionResponse.getSessionId());
@@ -94,8 +95,7 @@ class VoiceInterviewIntegrationTest {
             assertFalse(shouldTransition, "Should not transition with low question count");
 
             // Step 3: End session
-            String sessionIdStr = sessionId.toString();
-            voiceInterviewService.endSession(sessionIdStr);
+            voiceInterviewService.endSession(1L, sessionId);
 
             // Verify session status
             VoiceInterviewSessionEntity endedSession = sessionRepository.findById(sessionId).orElse(null);
@@ -116,7 +116,7 @@ class VoiceInterviewIntegrationTest {
                 .plannedDuration(20)
                 .build();
 
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
+            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(1L, request);
             Long sessionId = sessionResponse.getSessionId();
 
             // Initial phase should be INTRO
@@ -145,7 +145,7 @@ class VoiceInterviewIntegrationTest {
                 .plannedDuration(25)
                 .build();
 
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
+            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(1L, request);
             Long sessionId = sessionResponse.getSessionId();
 
             // Verify database persistence
@@ -172,7 +172,7 @@ class VoiceInterviewIntegrationTest {
                 .plannedDuration(45)
                 .build();
 
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
+            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(1L, request);
             Long sessionId = sessionResponse.getSessionId();
 
             VoiceInterviewSessionEntity session = sessionRepository.findById(sessionId).orElseThrow();
@@ -209,12 +209,7 @@ class VoiceInterviewIntegrationTest {
         @DisplayName("处理无效的会话ID")
         void testInvalidSessionId() {
             // Try to end a non-existent session
-            String invalidSessionId = "99999";
-
-            // Service should handle non-existent session gracefully (no exception)
-            assertDoesNotThrow(() -> {
-                voiceInterviewService.endSession(invalidSessionId);
-            });
+            assertThrows(BusinessException.class, () -> voiceInterviewService.endSession(1L, 99999L));
         }
 
         @Test
@@ -225,7 +220,7 @@ class VoiceInterviewIntegrationTest {
                 .roleType("ali-p8")
                 .build();
 
-            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
+            SessionResponseDTO sessionResponse = voiceInterviewService.createSession(1L, request);
 
             assertNotNull(sessionResponse);
             assertNotNull(sessionResponse.getSessionId());
@@ -242,7 +237,7 @@ class VoiceInterviewIntegrationTest {
                     .plannedDuration(30)
                     .build();
 
-                SessionResponseDTO sessionResponse = voiceInterviewService.createSession(request);
+                SessionResponseDTO sessionResponse = voiceInterviewService.createSession(1L, request);
 
                 assertNotNull(sessionResponse, "Session should be created for role: " + roleType);
                 assertEquals(roleType, sessionResponse.getRoleType());

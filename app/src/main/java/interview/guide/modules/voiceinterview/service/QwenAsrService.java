@@ -96,15 +96,15 @@ public class QwenAsrService {
 
     /**
      * Active ASR sessions map.
-     * Key: session ID (user-provided identifier)
+     * Key: voice interview session ID
      * Value: AsrSession containing the OmniRealtimeConversation instance and callbacks
      */
-    private final Map<String, AsrSession> sessions = new ConcurrentHashMap<>();
+    private final Map<Long, AsrSession> sessions = new ConcurrentHashMap<>();
 
     /** 防止同一 interview sessionId 上并发 stop/start；并在重连时与 {@link #sessionLocks} 配合 */
-    private final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Object> sessionLocks = new ConcurrentHashMap<>();
 
-    private Object lockForSession(String sessionId) {
+    private Object lockForSession(Long sessionId) {
         return sessionLocks.computeIfAbsent(sessionId, k -> new Object());
     }
 
@@ -138,18 +138,18 @@ public class QwenAsrService {
      * @param onError Callback invoked when errors occur
      * @throws IllegalStateException if session already exists or service not initialized
      */
-    public void startTranscription(String sessionId, Consumer<String> onFinal, Consumer<Throwable> onError) {
+    public void startTranscription(Long sessionId, Consumer<String> onFinal, Consumer<Throwable> onError) {
         startTranscription(sessionId, onFinal, null, onError);
     }
 
     /**
-     * Same as {@link #startTranscription(String, Consumer, Consumer)} but forwards partial transcripts
+     * Same as {@link #startTranscription(Long, Consumer, Consumer)} but forwards partial transcripts
      * ({@code conversation.item.input_audio_transcription.text}) for live subtitles.
      *
      * @param onPartial May be null if partials are not needed
      */
     public void startTranscription(
-            String sessionId,
+            Long sessionId,
             Consumer<String> onFinal,
             Consumer<String> onPartial,
             Consumer<Throwable> onError) {
@@ -157,7 +157,7 @@ public class QwenAsrService {
     }
 
     public void startTranscription(
-            String sessionId,
+            Long sessionId,
             Consumer<String> onFinal,
             Consumer<String> onPartial,
             Runnable onReady,
@@ -171,7 +171,7 @@ public class QwenAsrService {
      * 停止旧连接并重新建立（用于 ASR WebSocket 被服务端关闭后恢复识别）。
      */
     public void restartTranscription(
-            String sessionId,
+            Long sessionId,
             Consumer<String> onFinal,
             Consumer<String> onPartial,
             Consumer<Throwable> onError) {
@@ -179,7 +179,7 @@ public class QwenAsrService {
     }
 
     public void restartTranscription(
-            String sessionId,
+            Long sessionId,
             Consumer<String> onFinal,
             Consumer<String> onPartial,
             Runnable onReady,
@@ -215,7 +215,7 @@ public class QwenAsrService {
     }
 
     private void startTranscriptionLocked(
-            String sessionId,
+            Long sessionId,
             Consumer<String> onFinal,
             Consumer<String> onPartial,
             Runnable onReady,
@@ -338,7 +338,7 @@ public class QwenAsrService {
      * @param audioData Raw PCM audio bytes
      * @throws IllegalStateException if session does not exist
      */
-    public void sendAudio(String sessionId, byte[] audioData) {
+    public void sendAudio(Long sessionId, byte[] audioData) {
         AsrSession session = sessions.get(sessionId);
         if (session == null) {
             throw new IllegalStateException("No active session found: " + sessionId);
@@ -377,7 +377,7 @@ public class QwenAsrService {
      *
      * @param sessionId Session identifier
      */
-    public void stopTranscription(String sessionId) {
+    public void stopTranscription(Long sessionId) {
         synchronized (lockForSession(sessionId)) {
             AsrSession session = sessions.remove(sessionId);
             // Clean up the session lock to prevent memory leak
@@ -411,11 +411,11 @@ public class QwenAsrService {
      * @param sessionId Session identifier
      * @return true if session exists and is active, false otherwise
      */
-    public boolean hasActiveSession(String sessionId) {
+    public boolean hasActiveSession(Long sessionId) {
         return sessions.containsKey(sessionId);
     }
 
-    public boolean isReady(String sessionId) {
+    public boolean isReady(Long sessionId) {
         AsrSession session = sessions.get(sessionId);
         return session != null && session.isReady();
     }
@@ -460,7 +460,7 @@ public class QwenAsrService {
      * @param onError Callback for errors
      */
     private void handleServerEvent(
-            String sessionId,
+            Long sessionId,
             JsonObject message,
             Consumer<String> onFinal,
             Consumer<String> onPartial,
@@ -540,7 +540,7 @@ public class QwenAsrService {
      * Forward partial / streaming ASR text for real-time UI (VAD alone does not imply visible STT).
      */
     private void dispatchPartialTranscript(
-            String sessionId, JsonObject message, Consumer<String> onPartial) {
+            Long sessionId, JsonObject message, Consumer<String> onPartial) {
         if (onPartial == null) {
             log.trace("[Session: {}] Partial transcription received (no consumer)", sessionId);
             return;

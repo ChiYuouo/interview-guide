@@ -72,7 +72,7 @@ class VoiceInterviewSummaryPersistenceTest {
         42L, VoiceInterviewMessageEntity.MESSAGE_TYPE_SUMMARY))
         .thenReturn(List.of(dialogue));
 
-    List<VoiceInterviewMessageEntity> result = service.getConversationHistory("42");
+    List<VoiceInterviewMessageEntity> result = service.getConversationHistory(42L);
 
     assertThat(result).containsExactly(dialogue);
   }
@@ -94,7 +94,7 @@ class VoiceInterviewSummaryPersistenceTest {
         .thenReturn(Optional.of(existing));
 
     existing.setSummaryCoveredSequenceNum(6);
-    service.saveSummaryRow("42", "新摘要", 10);
+    service.saveSummaryRow(42L, "新摘要", 10);
 
     assertThat(existing.getAiGeneratedText()).isEqualTo("新摘要");
     // 真实边界写入新字段；负 sequenceNum 仅保留排序语义不再编码轮数
