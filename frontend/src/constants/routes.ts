@@ -2,6 +2,8 @@ export const ROUTES = {
   login: '/login',
   interviewSchedule: '/interview-schedule',
   interview: '/interview',
+  interviewHub: '/interview-hub',
+  interviewHistory: '/interviews',
   interviewCreate: (requestId: string) => `/interview/create/${requestId}`,
   interviewSession: (sessionId: string) => `/interview/session/${sessionId}`,
   resumeUpload: '/upload',
@@ -12,4 +14,6 @@ export const ROUTES = {
 export const ROUTE_PATTERNS = {
   interviewCreate: 'interview/create/:requestId',
   interviewSession: 'interview/session/:activeSessionId',
+  interviewLegacy: 'interview/:resumeId',
+  interviewDetail: 'interviews/:sessionId',
 } as const;

@@ -27,10 +27,12 @@ public interface InterviewAnswerRepository extends JpaRepository<InterviewAnswer
     /**
      * 根据会话 sessionId 字符串查找所有答案
      */
-    List<InterviewAnswerEntity> findBySession_SessionIdOrderByQuestionIndex(String sessionId);
+    List<InterviewAnswerEntity> findBySession_UserIdAndSession_SessionIdOrderByQuestionIndex(
+        Long userId, String sessionId);
 
     /**
      * 根据会话 sessionId 和问题索引查找单条答案（用于 upsert）
      */
-    Optional<InterviewAnswerEntity> findBySession_SessionIdAndQuestionIndex(String sessionId, Integer questionIndex);
+    Optional<InterviewAnswerEntity> findBySession_UserIdAndSession_SessionIdAndQuestionIndex(
+        Long userId, String sessionId, Integer questionIndex);
 }

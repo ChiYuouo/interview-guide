@@ -122,7 +122,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
             new TypeReference<>() {}
         );
 
-        List<InterviewAnswerEntity> answers = persistenceService.findAnswersBySessionId(sessionId);
+        List<InterviewAnswerEntity> answers = persistenceService.findAnswersBySessionId(session.getUserId(), sessionId);
         for (InterviewAnswerEntity answer : answers) {
             int index = answer.getQuestionIndex();
             if (index >= 0 && index < questions.size()) {
@@ -137,7 +137,7 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
         InterviewReportDTO report = evaluationService.evaluateInterview(chatClient, sessionId, resumeText, questions);
-        persistenceService.saveReport(sessionId, report);
+        persistenceService.saveReport(session.getUserId(), sessionId, report);
     }
 
     @Override

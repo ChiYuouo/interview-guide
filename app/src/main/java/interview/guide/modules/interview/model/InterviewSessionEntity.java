@@ -2,7 +2,23 @@ package interview.guide.modules.interview.model;
 
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.modules.resume.model.ResumeEntity;
-import jakarta.persistence.*;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -15,20 +31,25 @@ import java.util.List;
 @Table(name = "interview_sessions", indexes = {
     @Index(name = "idx_interview_session_resume_created", columnList = "resume_id,created_at"),
     @Index(name = "idx_interview_session_resume_status_created", columnList = "resume_id,status,created_at"),
-    @Index(name = "idx_interview_session_skill_created", columnList = "skillId,createdAt")
-})
+    @Index(name = "idx_interview_session_skill_created", columnList = "skillId,createdAt"),
+    @Index(name = "idx_interview_sessions_user_created", columnList = "user_id,created_at")
+}, uniqueConstraints = @UniqueConstraint(name = "uk_interview_sessions_user_request",
+    columnNames = {"user_id", "request_id"}))
 public class InterviewSessionEntity {
     
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    
+
+    @Column(name = "user_id", nullable = false, updatable = false)
+    private Long userId;
+
     // 会话ID (UUID)
     @Column(nullable = false, unique = true, length = 36)
     private String sessionId;
 
     // 创建请求幂等键（仅文本面试创建链路使用）
-    @Column(name = "request_id", unique = true, length = 64)
+    @Column(name = "request_id", length = 64)
     private String requestId;
     
     // 面试主题
@@ -136,6 +157,14 @@ public class InterviewSessionEntity {
     
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
+
+    public Long getUserId() {
+        return userId;
     }
     
     public String getSessionId() {

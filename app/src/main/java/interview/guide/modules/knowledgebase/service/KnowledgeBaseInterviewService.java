@@ -54,7 +54,7 @@ public class KnowledgeBaseInterviewService {
                                 List<KnowledgeBaseQuestionFollowUpDTO> followUps) {
   }
 
-  public InterviewSessionDTO createSession(CreateKnowledgeBaseInterviewRequest request) {
+  public InterviewSessionDTO createSession(Long userId, CreateKnowledgeBaseInterviewRequest request) {
     knowledgeBaseRepository.findById(request.knowledgeBaseId())
         .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND));
 
@@ -88,6 +88,7 @@ public class KnowledgeBaseInterviewService {
 
     // skillId 已不再有业务含义，统一用默认值回填到面试会话表
     return interviewSessionService.createSessionFromQuestions(
+        userId,
         questions,
         request.llmProvider(),
         KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID,

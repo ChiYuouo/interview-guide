@@ -110,6 +110,8 @@ export default function Layout({username, admin, onLogout}: LayoutProps) {
   };
 
   const resumeNav = { id: 'resumes', path: ROUTES.resumeHistory, label: '简历管理', icon: FileStack, description: '管理简历，AI 分析' };
+  const interviewNav = { id: 'interview-hub', path: ROUTES.interviewHub, label: '模拟面试', icon: Sparkles, description: admin ? '文字/语音面试练习' : '文字面试练习' };
+  const interviewHistoryNav = { id: 'interviews', path: ROUTES.interviewHistory, label: '面试记录', icon: Users, description: '查看面试历史' };
 
   // 按业务模块组织的导航项
   const navGroups: NavGroup[] = admin ? [
@@ -118,8 +120,8 @@ export default function Layout({username, admin, onLogout}: LayoutProps) {
       title: '面试准备',
       items: [
         resumeNav,
-        { id: 'interview-hub', path: '/interview-hub', label: '模拟面试', icon: Sparkles, description: '文字/语音面试练习' },
-        { id: 'interviews', path: '/interviews', label: '面试记录', icon: Users, description: '查看面试历史' },
+        interviewNav,
+        interviewHistoryNav,
         scheduleNav,
       ],
     },
@@ -139,7 +141,7 @@ export default function Layout({username, admin, onLogout}: LayoutProps) {
         { id: 'settings', path: '/settings', label: '设置', icon: Settings, description: '管理模型和语音服务' },
       ],
     },
-  ] : [{ id: 'interview', title: '面试准备', items: [resumeNav, scheduleNav] }];
+  ] : [{ id: 'interview', title: '面试准备', items: [resumeNav, interviewNav, interviewHistoryNav, scheduleNav] }];
 
   // 判断当前页面是否匹配导航项
   const isActive = (path: string) => {
@@ -288,7 +290,7 @@ export default function Layout({username, admin, onLogout}: LayoutProps) {
         onStart={handleInterviewStart}
         defaultMode={interviewModalPreset?.defaultMode || 'text'}
         defaultResumeId={interviewModalPreset?.defaultResumeId}
-        hideModeSwitch={interviewModalPreset?.defaultResumeId == null}
+        hideModeSwitch={!admin || interviewModalPreset?.defaultResumeId == null}
         title={interviewModalPreset?.title || '开始模拟面试'}
         subtitle={interviewModalPreset?.subtitle || '选择面试模式和主题，快速开始'}
         startButtonText={interviewModalPreset?.startButtonText || '开始面试'}

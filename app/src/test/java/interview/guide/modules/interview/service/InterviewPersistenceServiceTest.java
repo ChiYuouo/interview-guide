@@ -40,7 +40,7 @@ class InterviewPersistenceServiceTest {
     when(sessionRepository.save(any(InterviewSessionEntity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
-    service.saveSession("sid1", null, 1, List.of(), "dashscope",
+    service.saveSession(1L, "sid1", null, 1, List.of(), "dashscope",
         "knowledge-base", "mid", "KNOWLEDGE_BASE", 9L, "MySQL");
 
     ArgumentCaptor<InterviewSessionEntity> captor = ArgumentCaptor.forClass(InterviewSessionEntity.class);
@@ -58,7 +58,7 @@ class InterviewPersistenceServiceTest {
     when(sessionRepository.save(any(InterviewSessionEntity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
-    service.saveSession("sid2", null, 1, List.of(), "dashscope", "java-backend", "mid");
+    service.saveSession(2L, "sid2", null, 1, List.of(), "dashscope", "java-backend", "mid");
 
     ArgumentCaptor<InterviewSessionEntity> captor = ArgumentCaptor.forClass(InterviewSessionEntity.class);
     verify(sessionRepository).save(captor.capture());

@@ -58,7 +58,7 @@ class KnowledgeBaseInterviewServiceTest {
     CreateKnowledgeBaseInterviewRequest request =
         new CreateKnowledgeBaseInterviewRequest(1L, null, "mid", 1, 0, "");
 
-    assertThatThrownBy(() -> service.createSession(request))
+    assertThatThrownBy(() -> service.createSession(1L, request))
         .isInstanceOfSatisfying(BusinessException.class, exception -> {
           assertThat(exception.getCode()).isEqualTo(ErrorCode.INTERVIEW_QUESTION_INSUFFICIENT.getCode());
           assertThat(exception.getMessage()).contains("需要 1 道主问题", "只有 0 道");
@@ -77,15 +77,15 @@ class KnowledgeBaseInterviewServiceTest {
     when(questionRepository.findByKnowledgeBase_IdAndDifficultyAndStatusOrderByUpdatedAtDesc(
         1L, "mid", KnowledgeBaseQuestionStatus.ACTIVE)).thenReturn(List.of(question));
     when(interviewSessionService.createSessionFromQuestions(
-        any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq(null)))
+        eq(1L), any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq(null)))
         .thenReturn(expected);
 
-    InterviewSessionDTO actual = service.createSession(
+    InterviewSessionDTO actual = service.createSession(1L,
         new CreateKnowledgeBaseInterviewRequest(1L, null, "mid", 1, 1, ""));
 
     ArgumentCaptor<List<InterviewQuestionDTO>> captor = ArgumentCaptor.forClass(List.class);
     verify(interviewSessionService).createSessionFromQuestions(
-        captor.capture(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L),
+        eq(1L), captor.capture(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L),
         eq(null));
     assertThat(actual).isSameAs(expected);
     assertThat(captor.getValue()).hasSize(2);
@@ -104,10 +104,10 @@ class KnowledgeBaseInterviewServiceTest {
     when(questionRepository.findByKnowledgeBase_IdAndDifficultyAndCategoryAndStatusOrderByUpdatedAtDesc(
         1L, "mid", "Redis", KnowledgeBaseQuestionStatus.ACTIVE)).thenReturn(List.of(question));
     when(interviewSessionService.createSessionFromQuestions(
-        any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq("Redis")))
+        eq(1L), any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq("Redis")))
         .thenReturn(new InterviewSessionDTO("s", "", 1, 0, List.of(), SessionStatus.CREATED, 1L, "Redis"));
 
-    service.createSession(
+    service.createSession(1L,
         new CreateKnowledgeBaseInterviewRequest(1L, "Redis", "mid", 1, 0, ""));
 
     // 验证走的是按 category 过滤的查询方法，而不是全量方法
@@ -125,14 +125,14 @@ class KnowledgeBaseInterviewServiceTest {
     when(questionRepository.findByKnowledgeBase_IdAndDifficultyAndCategoryAndStatusOrderByUpdatedAtDesc(
         1L, "mid", "MySQL", KnowledgeBaseQuestionStatus.ACTIVE)).thenReturn(List.of(question));
     when(interviewSessionService.createSessionFromQuestions(
-        any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq("MySQL")))
+        eq(1L), any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq("MySQL")))
         .thenReturn(new InterviewSessionDTO("s", "", 1, 0, List.of(), SessionStatus.CREATED, 1L, "MySQL"));
 
-    InterviewSessionDTO actual = service.createSession(
+    InterviewSessionDTO actual = service.createSession(1L,
         new CreateKnowledgeBaseInterviewRequest(1L, "  MySQL  ", "mid", 1, 0, ""));
 
     verify(interviewSessionService).createSessionFromQuestions(
-        any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq("MySQL"));
+        eq(1L), any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq("MySQL"));
     assertThat(actual.interviewCategory()).isEqualTo("MySQL");
   }
 
@@ -146,15 +146,15 @@ class KnowledgeBaseInterviewServiceTest {
     when(questionRepository.findByKnowledgeBase_IdAndDifficultyAndStatusOrderByUpdatedAtDesc(
         1L, "mid", KnowledgeBaseQuestionStatus.ACTIVE)).thenReturn(List.of(question));
     when(interviewSessionService.createSessionFromQuestions(
-        any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq(null)))
+        eq(1L), any(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L), eq(null)))
         .thenReturn(new InterviewSessionDTO("s", "", 3, 0, List.of(), SessionStatus.CREATED, 1L, null));
 
-    service.createSession(
+    service.createSession(1L,
         new CreateKnowledgeBaseInterviewRequest(1L, null, "mid", 1, 2, ""));
 
     ArgumentCaptor<List<InterviewQuestionDTO>> captor = ArgumentCaptor.forClass(List.class);
     verify(interviewSessionService).createSessionFromQuestions(
-        captor.capture(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L),
+        eq(1L), captor.capture(), eq(""), eq(KnowledgeBaseQuestionEntity.DEFAULT_SKILL_ID), eq("mid"), eq(1L),
         eq(null));
 
     List<InterviewQuestionDTO> built = captor.getValue();
@@ -176,7 +176,7 @@ class KnowledgeBaseInterviewServiceTest {
     when(questionRepository.findByKnowledgeBase_IdAndDifficultyAndStatusOrderByUpdatedAtDesc(
         1L, "mid", KnowledgeBaseQuestionStatus.ACTIVE)).thenReturn(List.of(question));
 
-    assertThatThrownBy(() -> service.createSession(
+    assertThatThrownBy(() -> service.createSession(1L,
         new CreateKnowledgeBaseInterviewRequest(1L, null, "mid", 1, 3, "")))
         .isInstanceOfSatisfying(BusinessException.class, exception -> {
           assertThat(exception.getCode()).isEqualTo(ErrorCode.INTERVIEW_QUESTION_INSUFFICIENT.getCode());
@@ -184,7 +184,7 @@ class KnowledgeBaseInterviewServiceTest {
         });
 
     verify(interviewSessionService, never()).createSessionFromQuestions(
-        any(), any(), any(), any(), any(), any());
+        any(), any(), any(), any(), any(), any(), any());
   }
 
   @Test

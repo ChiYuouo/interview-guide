@@ -199,6 +199,7 @@ interface InterviewHistoryPageProps {
   onRestartInterview?: (resumeId: number) => void;
   onContinueInterview?: (sessionId: string) => void;
   knowledgeBaseId?: number;
+  enableVoice?: boolean;
 }
 
 /** Shallow comparison for polling change-detection */
@@ -220,6 +221,7 @@ export default function InterviewHistoryPage({
   onRestartInterview,
   onContinueInterview,
   knowledgeBaseId,
+  enableVoice = true,
 }: InterviewHistoryPageProps) {
   const navigate = useNavigate();
   const knowledgeBaseFilterId = knowledgeBaseId ?? null;
@@ -261,7 +263,7 @@ export default function InterviewHistoryPage({
       const scopedTextInterviews = isKnowledgeBaseView
         ? textInterviews.filter(item => item.knowledgeBaseId === knowledgeBaseFilterId)
         : textInterviews.filter(item => item.sourceType !== 'KNOWLEDGE_BASE');
-      const voiceSessions = isKnowledgeBaseView ? [] : await loadVoiceInterviews();
+      const voiceSessions = isKnowledgeBaseView || !enableVoice ? [] : await loadVoiceInterviews();
 
       const voiceWithNames = voiceSessions.map(item => {
         const skillName = getTemplateName(item.title, loadedSkills);
@@ -282,7 +284,7 @@ export default function InterviewHistoryPage({
     } finally {
       if (!isPolling) setLoading(false);
     }
-  }, [isKnowledgeBaseView, knowledgeBaseFilterId]);
+  }, [enableVoice, isKnowledgeBaseView, knowledgeBaseFilterId]);
 
   // Load text interviews from dedicated API
   async function loadTextInterviews(skills: SkillDTO[]): Promise<UnifiedInterviewItem[]> {
@@ -627,7 +629,7 @@ export default function InterviewHistoryPage({
       )}
 
       {/* Type filter tabs */}
-      {!isKnowledgeBaseView && <div className="flex items-center gap-2 mb-6">
+      {enableVoice && !isKnowledgeBaseView && <div className="flex items-center gap-2 mb-6">
         {([
           { key: 'all', label: '全部' },
           { key: 'text', label: '文字面试' },

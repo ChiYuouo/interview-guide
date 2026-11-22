@@ -17,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Optional;
 
 /**
  * 面试历史服务
@@ -37,13 +36,8 @@ public class InterviewHistoryService {
      * 获取面试会话详情
      */
     @Transactional(readOnly = true)
-    public InterviewDetailDTO getInterviewDetail(String sessionId) {
-        Optional<InterviewSessionEntity> sessionOpt = interviewPersistenceService.findBySessionId(sessionId);
-        if (sessionOpt.isEmpty()) {
-            throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
-        }
-
-        InterviewSessionEntity session = sessionOpt.get();
+    public InterviewDetailDTO getInterviewDetail(Long userId, String sessionId) {
+        InterviewSessionEntity session = interviewPersistenceService.requireOwnedSession(userId, sessionId);
 
         // 解析JSON字段
         List<Object> questions = parseJson(session.getQuestionsJson(), new TypeReference<>() {});
@@ -146,13 +140,8 @@ public class InterviewHistoryService {
     /**
      * 导出面试报告为PDF
      */
-    public byte[] exportInterviewPdf(String sessionId) {
-        Optional<InterviewSessionEntity> sessionOpt = interviewPersistenceService.findBySessionId(sessionId);
-        if (sessionOpt.isEmpty()) {
-            throw new BusinessException(ErrorCode.INTERVIEW_SESSION_NOT_FOUND);
-        }
-
-        InterviewSessionEntity session = sessionOpt.get();
+    public byte[] exportInterviewPdf(Long userId, String sessionId) {
+        InterviewSessionEntity session = interviewPersistenceService.requireOwnedSession(userId, sessionId);
         try {
             return pdfExportService.exportInterviewReport(session);
         } catch (Exception e) {

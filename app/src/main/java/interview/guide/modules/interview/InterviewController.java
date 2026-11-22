@@ -1,6 +1,8 @@
 package interview.guide.modules.interview;
 
 import interview.guide.common.annotation.RateLimit;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.result.Result;
 import interview.guide.modules.auth.model.AccountPrincipal;
 import interview.guide.modules.interview.model.CreateInterviewRequest;
@@ -53,8 +55,8 @@ public class InterviewController {
      * 列出所有面试会话（用于面试记录页）
      */
     @GetMapping("/api/interview/sessions")
-    public Result<List<SessionListItemDTO>> listSessions() {
-        List<SessionListItemDTO> items = persistenceService.findAll().stream()
+    public Result<List<SessionListItemDTO>> listSessions(@AuthenticationPrincipal AccountPrincipal account) {
+        List<SessionListItemDTO> items = persistenceService.findAll(account.getUserId()).stream()
             .map(SessionListItemDTO::from)
             .toList();
         return Result.success(items);
@@ -72,7 +74,7 @@ public class InterviewController {
             resumes.requireOwnedResume(account.getUserId(), request.resumeId());
         }
         log.info("创建面试会话，题目数量: {}", request.questionCount());
-        InterviewSessionDTO session = sessionService.createSession(request);
+        InterviewSessionDTO session = sessionService.createSession(account.getUserId(), request);
         return Result.success(session);
     }
     
@@ -80,8 +82,9 @@ public class InterviewController {
      * 获取会话信息
      */
     @GetMapping("/api/interview/sessions/{sessionId}")
-    public Result<InterviewSessionDTO> getSession(@PathVariable String sessionId) {
-        InterviewSessionDTO session = sessionService.getSession(sessionId);
+    public Result<InterviewSessionDTO> getSession(
+        @AuthenticationPrincipal AccountPrincipal account, @PathVariable String sessionId) {
+        InterviewSessionDTO session = sessionService.getSession(account.getUserId(), sessionId);
         return Result.success(session);
     }
     
@@ -89,8 +92,9 @@ public class InterviewController {
      * 获取当前问题
      */
     @GetMapping("/api/interview/sessions/{sessionId}/question")
-    public Result<Map<String, Object>> getCurrentQuestion(@PathVariable String sessionId) {
-        return Result.success(sessionService.getCurrentQuestionResponse(sessionId));
+    public Result<Map<String, Object>> getCurrentQuestion(
+        @AuthenticationPrincipal AccountPrincipal account, @PathVariable String sessionId) {
+        return Result.success(sessionService.getCurrentQuestionResponse(account.getUserId(), sessionId));
     }
     
     /**
@@ -99,13 +103,14 @@ public class InterviewController {
     @PostMapping("/api/interview/sessions/{sessionId}/answers")
     @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
     public Result<SubmitAnswerResponse> submitAnswer(
+            @AuthenticationPrincipal AccountPrincipal account,
             @PathVariable String sessionId,
             @RequestBody Map<String, Object> body) {
         Integer questionIndex = (Integer) body.get("questionIndex");
         String answer = (String) body.get("answer");
         log.info("提交答案: 会话{}, 问题{}", sessionId, questionIndex);
         SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, questionIndex, answer);
-        SubmitAnswerResponse response = sessionService.submitAnswer(request);
+        SubmitAnswerResponse response = sessionService.submitAnswer(account.getUserId(), request);
         return Result.success(response);
     }
     
@@ -113,9 +118,10 @@ public class InterviewController {
      * 生成面试报告
      */
     @GetMapping("/api/interview/sessions/{sessionId}/report")
-    public Result<InterviewReportDTO> getReport(@PathVariable String sessionId) {
+    public Result<InterviewReportDTO> getReport(
+        @AuthenticationPrincipal AccountPrincipal account, @PathVariable String sessionId) {
         log.info("生成面试报告: {}", sessionId);
-        InterviewReportDTO report = sessionService.generateReport(sessionId);
+        InterviewReportDTO report = sessionService.generateReport(account.getUserId(), sessionId);
         return Result.success(report);
     }
     
@@ -126,8 +132,7 @@ public class InterviewController {
     @GetMapping("/api/interview/sessions/unfinished/{resumeId}")
     public Result<InterviewSessionDTO> findUnfinishedSession(
         @AuthenticationPrincipal AccountPrincipal account, @PathVariable Long resumeId) {
-        resumes.requireOwnedResume(account.getUserId(), resumeId);
-        return Result.success(sessionService.findUnfinishedSessionOrThrow(resumeId));
+        return Result.success(sessionService.findUnfinishedSessionOrThrow(account.getUserId(), resumeId));
     }
     
     /**
@@ -135,13 +140,14 @@ public class InterviewController {
      */
     @PutMapping("/api/interview/sessions/{sessionId}/answers")
     public Result<Void> saveAnswer(
+            @AuthenticationPrincipal AccountPrincipal account,
             @PathVariable String sessionId,
             @RequestBody Map<String, Object> body) {
         Integer questionIndex = (Integer) body.get("questionIndex");
         String answer = (String) body.get("answer");
         log.info("暂存答案: 会话{}, 问题{}", sessionId, questionIndex);
         SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, questionIndex, answer);
-        sessionService.saveAnswer(request);
+        sessionService.saveAnswer(account.getUserId(), request);
         return Result.success(null);
     }
     
@@ -149,9 +155,10 @@ public class InterviewController {
      * 提前交卷
      */
     @PostMapping("/api/interview/sessions/{sessionId}/complete")
-    public Result<Void> completeInterview(@PathVariable String sessionId) {
+    public Result<Void> completeInterview(
+        @AuthenticationPrincipal AccountPrincipal account, @PathVariable String sessionId) {
         log.info("提前交卷: {}", sessionId);
-        sessionService.completeInterview(sessionId);
+        sessionService.completeInterview(account.getUserId(), sessionId);
         return Result.success(null);
     }
     
@@ -160,8 +167,9 @@ public class InterviewController {
      * GET /api/interview/sessions/{sessionId}/details
      */
     @GetMapping("/api/interview/sessions/{sessionId}/details")
-    public Result<InterviewDetailDTO> getInterviewDetail(@PathVariable String sessionId) {
-        InterviewDetailDTO detail = historyService.getInterviewDetail(sessionId);
+    public Result<InterviewDetailDTO> getInterviewDetail(
+        @AuthenticationPrincipal AccountPrincipal account, @PathVariable String sessionId) {
+        InterviewDetailDTO detail = historyService.getInterviewDetail(account.getUserId(), sessionId);
         return Result.success(detail);
     }
     
@@ -169,18 +177,22 @@ public class InterviewController {
      * 导出面试报告为PDF
      */
     @GetMapping("/api/interview/sessions/{sessionId}/export")
-    public ResponseEntity<byte[]> exportInterviewPdf(@PathVariable String sessionId) {
+    public ResponseEntity<byte[]> exportInterviewPdf(
+        @AuthenticationPrincipal AccountPrincipal account, @PathVariable String sessionId) {
         try {
-            byte[] pdfBytes = historyService.exportInterviewPdf(sessionId);
-            String filename = URLEncoder.encode("模拟面试报告_" + sessionId + ".pdf", 
-                StandardCharsets.UTF_8);
-            
+            byte[] pdfBytes = historyService.exportInterviewPdf(account.getUserId(), sessionId);
+            String filename = URLEncoder.encode("模拟面试报告_" + sessionId + ".pdf", StandardCharsets.UTF_8);
+
             return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
                 .contentType(MediaType.APPLICATION_PDF)
                 .body(pdfBytes);
         } catch (Exception e) {
-            log.error("导出PDF失败", e);
+            if (e instanceof BusinessException businessException
+                && ErrorCode.INTERVIEW_SESSION_NOT_FOUND.getCode().equals(businessException.getCode())) {
+                throw businessException;
+            }
+            log.error("导出PDF失败: sessionId={}", sessionId, e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -189,9 +201,10 @@ public class InterviewController {
      * 删除面试会话
      */
     @DeleteMapping("/api/interview/sessions/{sessionId}")
-    public Result<Void> deleteInterview(@PathVariable String sessionId) {
+    public Result<Void> deleteInterview(
+        @AuthenticationPrincipal AccountPrincipal account, @PathVariable String sessionId) {
         log.info("删除面试会话: {}", sessionId);
-        persistenceService.deleteSessionBySessionId(sessionId);
+        sessionService.deleteSession(account.getUserId(), sessionId);
         return Result.success(null);
     }
 }

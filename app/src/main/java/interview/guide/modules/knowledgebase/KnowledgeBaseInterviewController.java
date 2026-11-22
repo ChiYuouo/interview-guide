@@ -2,6 +2,7 @@ package interview.guide.modules.knowledgebase;
 
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.result.Result;
+import interview.guide.modules.auth.model.AccountPrincipal;
 import interview.guide.modules.interview.model.InterviewSessionDTO;
 import interview.guide.modules.knowledgebase.model.CreateKnowledgeBaseInterviewRequest;
 import interview.guide.modules.knowledgebase.model.CreateKnowledgeBaseQuestionRequest;
@@ -19,6 +20,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -97,8 +99,9 @@ public class KnowledgeBaseInterviewController {
 
   @PostMapping("/api/knowledgebase-interviews/sessions")
   public Result<InterviewSessionDTO> createInterviewSession(
+      @AuthenticationPrincipal AccountPrincipal account,
       @Valid @RequestBody CreateKnowledgeBaseInterviewRequest request) {
-    return Result.success(interviewService.createSession(request));
+    return Result.success(interviewService.createSession(account.getUserId(), request));
   }
 
   @GetMapping("/api/knowledgebase/{id}/interview-capacity")

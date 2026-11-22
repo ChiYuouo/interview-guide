@@ -91,21 +91,19 @@ public class InterviewSessionCache {
     /**
      * 保存会话到缓存
      */
-    public void saveSession(String sessionId, String resumeText, Long resumeId, Long knowledgeBaseId,
+    public void saveSession(Long userId, String sessionId, String resumeText, Long resumeId, Long knowledgeBaseId,
                            String interviewCategory,
                            List<InterviewQuestionDTO> questions, int currentIndex,
                            SessionStatus status) {
-        String key = buildSessionKey(sessionId);
         CachedSession cachedSession = new CachedSession(
             sessionId, resumeText, resumeId, knowledgeBaseId, interviewCategory,
             questions, currentIndex, status, objectMapper
         );
-
-        redisService.set(key, cachedSession, SESSION_TTL);
+        redisService.set(buildSessionKey(userId, sessionId), cachedSession, SESSION_TTL);
 
         // 如果有 resumeId，建立映射关系（用于查找未完成会话）
         if (resumeId != null && isUnfinishedStatus(status)) {
-            saveResumeSessionMapping(resumeId, sessionId);
+            saveResumeSessionMapping(userId, resumeId, sessionId);
         }
 
         log.debug("会话已缓存: sessionId={}, resumeId={}, kbId={}, status={}",
@@ -115,8 +113,8 @@ public class InterviewSessionCache {
     /**
      * 获取缓存的会话
      */
-    public Optional<CachedSession> getSession(String sessionId) {
-        String key = buildSessionKey(sessionId);
+    public Optional<CachedSession> getSession(Long userId, String sessionId) {
+        String key = buildSessionKey(userId, sessionId);
         CachedSession session = redisService.get(key);
         if (session != null) {
             log.debug("从缓存获取会话: sessionId={}", sessionId);
@@ -128,15 +126,15 @@ public class InterviewSessionCache {
     /**
      * 更新会话状态
      */
-    public void updateSessionStatus(String sessionId, SessionStatus status) {
-        getSession(sessionId).ifPresent(session -> {
+    public void updateSessionStatus(Long userId, String sessionId, SessionStatus status) {
+        getSession(userId, sessionId).ifPresent(session -> {
             session.setStatus(status);
-            String key = buildSessionKey(sessionId);
+            String key = buildSessionKey(userId, sessionId);
             redisService.set(key, session, SESSION_TTL);
 
             // 如果会话已完成，移除映射
             if (!isUnfinishedStatus(status) && session.getResumeId() != null) {
-                removeResumeSessionMapping(session.getResumeId(), sessionId);
+                removeResumeSessionMapping(userId, session.getResumeId(), sessionId);
             }
 
             log.debug("更新会话状态: sessionId={}, status={}", sessionId, status);
@@ -146,10 +144,10 @@ public class InterviewSessionCache {
     /**
      * 更新当前问题索引
      */
-    public void updateCurrentIndex(String sessionId, int currentIndex) {
-        getSession(sessionId).ifPresent(session -> {
+    public void updateCurrentIndex(Long userId, String sessionId, int currentIndex) {
+        getSession(userId, sessionId).ifPresent(session -> {
             session.setCurrentIndex(currentIndex);
-            String key = buildSessionKey(sessionId);
+            String key = buildSessionKey(userId, sessionId);
             redisService.set(key, session, SESSION_TTL);
             log.debug("更新会话进度: sessionId={}, currentIndex={}", sessionId, currentIndex);
         });
@@ -158,11 +156,11 @@ public class InterviewSessionCache {
     /**
      * 更新问题列表（用于保存答案）
      */
-    public void updateQuestions(String sessionId, List<InterviewQuestionDTO> questions) {
-        getSession(sessionId).ifPresent(session -> {
+    public void updateQuestions(Long userId, String sessionId, List<InterviewQuestionDTO> questions) {
+        getSession(userId, sessionId).ifPresent(session -> {
             try {
                 session.setQuestionsJson(objectMapper.writeValueAsString(questions));
-                String key = buildSessionKey(sessionId);
+                String key = buildSessionKey(userId, sessionId);
                 redisService.set(key, session, SESSION_TTL);
                 log.debug("更新会话问题: sessionId={}", sessionId);
             } catch (JacksonException e) {
@@ -174,14 +172,14 @@ public class InterviewSessionCache {
     /**
      * 删除会话缓存
      */
-    public void deleteSession(String sessionId) {
-        getSession(sessionId).ifPresent(session -> {
+    public void deleteSession(Long userId, String sessionId) {
+        getSession(userId, sessionId).ifPresent(session -> {
             if (session.getResumeId() != null) {
-                removeResumeSessionMapping(session.getResumeId(), sessionId);
+                removeResumeSessionMapping(userId, session.getResumeId(), sessionId);
             }
         });
 
-        String key = buildSessionKey(sessionId);
+        String key = buildSessionKey(userId, sessionId);
         redisService.delete(key);
         log.debug("删除会话缓存: sessionId={}", sessionId);
     }
@@ -189,12 +187,12 @@ public class InterviewSessionCache {
     /**
      * 根据简历ID查找未完成的会话ID
      */
-    public Optional<String> findUnfinishedSessionId(Long resumeId) {
-        String key = buildResumeSessionKey(resumeId);
+    public Optional<String> findUnfinishedSessionId(Long userId, Long resumeId) {
+        String key = buildResumeSessionKey(userId, resumeId);
         String sessionId = redisService.get(key);
         if (sessionId != null) {
             // 验证会话是否仍然存在且未完成
-            Optional<CachedSession> sessionOpt = getSession(sessionId);
+            Optional<CachedSession> sessionOpt = getSession(userId, sessionId);
             if (sessionOpt.isPresent() && isUnfinishedStatus(sessionOpt.get().getStatus())) {
                 return Optional.of(sessionId);
             } else {
@@ -208,36 +206,36 @@ public class InterviewSessionCache {
     /**
      * 刷新会话过期时间
      */
-    public void refreshSessionTTL(String sessionId) {
-        String key = buildSessionKey(sessionId);
+    public void refreshSessionTTL(Long userId, String sessionId) {
+        String key = buildSessionKey(userId, sessionId);
         redisService.expire(key, SESSION_TTL);
     }
 
     /**
      * 检查会话是否在缓存中
      */
-    public boolean exists(String sessionId) {
-        String key = buildSessionKey(sessionId);
+    public boolean exists(Long userId, String sessionId) {
+        String key = buildSessionKey(userId, sessionId);
         return redisService.exists(key);
     }
 
     // ==================== 私有方法 ====================
 
-    private String buildSessionKey(String sessionId) {
-        return SESSION_KEY_PREFIX + sessionId;
+    private String buildSessionKey(Long userId, String sessionId) {
+        return SESSION_KEY_PREFIX + userId + ":" + sessionId;
     }
 
-    private String buildResumeSessionKey(Long resumeId) {
-        return RESUME_SESSION_KEY_PREFIX + resumeId;
+    private String buildResumeSessionKey(Long userId, Long resumeId) {
+        return RESUME_SESSION_KEY_PREFIX + userId + ":" + resumeId;
     }
 
-    private void saveResumeSessionMapping(Long resumeId, String sessionId) {
-        String key = buildResumeSessionKey(resumeId);
+    private void saveResumeSessionMapping(Long userId, Long resumeId, String sessionId) {
+        String key = buildResumeSessionKey(userId, resumeId);
         redisService.set(key, sessionId, SESSION_TTL);
     }
 
-    private void removeResumeSessionMapping(Long resumeId, String sessionId) {
-        String key = buildResumeSessionKey(resumeId);
+    private void removeResumeSessionMapping(Long userId, Long resumeId, String sessionId) {
+        String key = buildResumeSessionKey(userId, resumeId);
         String currentSessionId = redisService.get(key);
         // 只有当前映射的是这个 sessionId 时才删除
         if (sessionId.equals(currentSessionId)) {

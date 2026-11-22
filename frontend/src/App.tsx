@@ -45,18 +45,18 @@ function UploadPageWrapper() {
 }
 
 // 历史记录列表包装器
-function HistoryListWrapper({ canInterview }: { canInterview: boolean }) {
+function HistoryListWrapper() {
   const navigate = useNavigate();
 
   const handleSelectResume = (id: number) => {
     navigate(`/history/${id}`);
   };
 
-  return <HistoryList onSelectResume={handleSelectResume} canInterview={canInterview} />;
+  return <HistoryList onSelectResume={handleSelectResume} />;
 }
 
 // 简历详情包装器
-function ResumeDetailWrapper({ canInterview }: { canInterview: boolean }) {
+function ResumeDetailWrapper() {
   const { resumeId } = useParams<{ resumeId: string }>();
   const navigate = useNavigate();
   const { openInterviewModalWithResume } = useOutletContext<{ openInterviewModalWithResume: (resumeId: number) => void }>();
@@ -73,7 +73,7 @@ function ResumeDetailWrapper({ canInterview }: { canInterview: boolean }) {
     <ResumeDetailPage
       resumeId={parseInt(resumeId, 10)}
       onBack={handleBack}
-      onStartInterview={canInterview ? openInterviewModalWithResume : undefined}
+      onStartInterview={openInterviewModalWithResume}
     />
   );
 }
@@ -234,7 +234,10 @@ function AppRoutes() {
 
   if (session && !session.admin
       && ![ROUTES.login, ROUTES.interviewSchedule, ROUTES.resumeUpload, ROUTES.resumeHistory,
-        `${ROUTES.resumeHistory}/:resumeId`].some(path => matchPath(path, location.pathname))) {
+        `${ROUTES.resumeHistory}/:resumeId`, ROUTES.interviewHub, ROUTES.interviewHistory,
+        ROUTES.interview, `/${ROUTE_PATTERNS.interviewCreate}`, `/${ROUTE_PATTERNS.interviewSession}`,
+        `/${ROUTE_PATTERNS.interviewLegacy}`, `/${ROUTE_PATTERNS.interviewDetail}`,
+      ].some(path => matchPath(path, location.pathname))) {
     return <Navigate to={ROUTES.interviewSchedule} replace />;
   }
 
@@ -267,19 +270,19 @@ function AppRoutes() {
             <Route path="upload" element={<UploadPageWrapper />} />
 
             {/* 历史记录列表（简历库） */}
-            <Route path="history" element={<HistoryListWrapper canInterview={session?.admin === true} />} />
+            <Route path="history" element={<HistoryListWrapper />} />
 
             {/* 简历详情 */}
-            <Route path="history/:resumeId" element={<ResumeDetailWrapper canInterview={session?.admin === true} />} />
+            <Route path="history/:resumeId" element={<ResumeDetailWrapper />} />
 
             {/* 面试中心 */}
-            <Route path="interview-hub" element={<InterviewHubPage />} />
+            <Route path={ROUTES.interviewHub.slice(1)} element={<InterviewHubPage enableVoice={session?.admin === true} />} />
 
             {/* 面试记录列表 */}
-            <Route path="interviews" element={<InterviewHistoryWrapper />} />
+            <Route path={ROUTES.interviewHistory.slice(1)} element={<InterviewHistoryWrapper enableVoice={session?.admin === true} />} />
 
             {/* 面试详情报告 */}
-            <Route path="interviews/:sessionId" element={<InterviewDetailPageWrapper />} />
+            <Route path={ROUTE_PATTERNS.interviewDetail} element={<InterviewDetailPageWrapper />} />
 
             {/* 模拟面试（通用入口） */}
             <Route path={ROUTES.interview.slice(1)} element={<InterviewWrapper />} />
@@ -291,7 +294,7 @@ function AppRoutes() {
             <Route path={ROUTE_PATTERNS.interviewSession} element={<InterviewWrapper />} />
 
             {/* 模拟面试 */}
-            <Route path="interview/:resumeId" element={<InterviewWrapper />} />
+            <Route path={ROUTE_PATTERNS.interviewLegacy} element={<InterviewWrapper />} />
 
             {/* 语音面试 */}
             <Route path="voice-interview" element={<VoiceInterviewPageWrapper />} />
@@ -327,7 +330,7 @@ function AppRoutes() {
 }
 
 // 面试记录页面包装器
-function InterviewHistoryWrapper() {
+function InterviewHistoryWrapper({ enableVoice }: { enableVoice: boolean }) {
   const navigate = useNavigate();
   const { openInterviewModalWithResume } = useOutletContext<{ openInterviewModalWithResume: (resumeId: number) => void }>();
 
@@ -347,7 +350,7 @@ function InterviewHistoryWrapper() {
     navigate(ROUTES.interviewSession(sessionId));
   };
 
-  return <InterviewHistoryPage onBack={handleBack} onViewInterview={handleViewInterview} onRestartInterview={handleRestartInterview} onContinueInterview={handleContinueInterview} />;
+  return <InterviewHistoryPage onBack={handleBack} onViewInterview={handleViewInterview} onRestartInterview={handleRestartInterview} onContinueInterview={handleContinueInterview} enableVoice={enableVoice} />;
 }
 
 // 知识库面试记录页面包装器

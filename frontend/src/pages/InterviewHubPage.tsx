@@ -32,7 +32,7 @@ interface RecentInterviewItem {
   voiceSessionId?: number;
 }
 
-export default function InterviewHubPage() {
+export default function InterviewHubPage({ enableVoice }: { enableVoice: boolean }) {
   const navigate = useNavigate();
 
   const config = useInterviewConfig({ autoLoad: false });
@@ -46,7 +46,7 @@ export default function InterviewHubPage() {
     try {
       const [textSessions, voiceSessions] = await Promise.all([
         interviewApi.listSessions().catch(() => [] as TextSessionMeta[]),
-        voiceInterviewApi.getAllSessions().catch(() => [] as SessionMeta[]),
+        enableVoice ? voiceInterviewApi.getAllSessions().catch(() => [] as SessionMeta[]) : [],
       ]);
 
       const items: RecentInterviewItem[] = [
@@ -77,7 +77,7 @@ export default function InterviewHubPage() {
     } finally {
       setLoadingRecent(false);
     }
-  }, []);
+  }, [enableVoice]);
 
   // 初始加载：skills 和 resumes 并行，再用 skills 加载面试记录
   useEffect(() => {
@@ -139,14 +139,16 @@ export default function InterviewHubPage() {
           <Sparkles className="w-7 h-7 text-primary-500" />
           模拟面试
         </h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1">选择面试模式和方向，快速开始练习</p>
+        <p className="text-slate-500 dark:text-slate-400 mt-1">
+          {enableVoice ? '选择面试模式和方向，快速开始练习' : '选择面试方向，开始文字面试练习'}
+        </p>
       </div>
 
       {/* 配置区域 */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 p-6 mb-8">
         <div className="space-y-6">
           {/* 面试模式 */}
-          <div>
+          {enableVoice && <div>
             <label className="flex items-center gap-2 mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
               面试模式
             </label>
@@ -195,7 +197,7 @@ export default function InterviewHubPage() {
                 );
               })}
             </div>
-          </div>
+          </div>}
 
           {/* 面试方向 */}
           <div>
