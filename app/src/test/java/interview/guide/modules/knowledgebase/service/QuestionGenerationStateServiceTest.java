@@ -51,11 +51,11 @@ class QuestionGenerationStateServiceTest {
   @DisplayName("创建任务时持久化配置并进入 QUEUED")
   void shouldCreateQueuedTaskWithConfig() {
     KnowledgeBaseEntity kb = buildKb(QuestionGenStatus.NONE, null);
-    when(knowledgeBaseRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(kb));
+    when(knowledgeBaseRepository.findByIdAndUserIdForUpdate(1L, 7L)).thenReturn(Optional.of(kb));
     when(knowledgeBaseRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
     QuestionGenerationConfig config = new QuestionGenerationConfig("mid", 5, 2, 3, "default");
-    var response = service.createTask(1L, config);
+    var response = service.createTask(7L, 1L, config);
 
     assertThat(response.questionGenStatus()).isEqualTo(QuestionGenStatus.QUEUED);
     assertThat(response.questionGenTaskId()).isNotBlank();
@@ -68,10 +68,10 @@ class QuestionGenerationStateServiceTest {
   @DisplayName("活动任务存在时拒绝重复创建")
   void shouldRejectCreatingSecondActiveTask() {
     KnowledgeBaseEntity kb = buildKb(QuestionGenStatus.PROCESSING, "task-1");
-    when(knowledgeBaseRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(kb));
+    when(knowledgeBaseRepository.findByIdAndUserIdForUpdate(1L, 7L)).thenReturn(Optional.of(kb));
 
     assertThatThrownBy(() -> service.createTask(
-        1L, new QuestionGenerationConfig("mid", 5, 2, 3, null)))
+        7L, 1L, new QuestionGenerationConfig("mid", 5, 2, 3, null)))
         .isInstanceOf(BusinessException.class)
         .hasMessageContaining("正在生成中");
 

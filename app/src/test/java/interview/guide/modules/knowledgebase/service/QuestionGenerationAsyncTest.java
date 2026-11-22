@@ -153,12 +153,12 @@ class QuestionGenerationAsyncTest {
     @DisplayName("首次提交后状态变为 QUEUED，并成功投递 Redis Stream 消息")
     void shouldSetQueuedAndSendToStream() {
       KnowledgeBaseEntity kb = buildKb(1L, QuestionGenStatus.NONE, null);
-      when(knowledgeBaseRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(kb));
+      when(knowledgeBaseRepository.findByIdAndUserIdForUpdate(1L, 7L)).thenReturn(Optional.of(kb));
       when(knowledgeBaseRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
       when(questionGenStreamProducer.sendGenerateTask(eq(1L), anyString())).thenReturn(true);
 
       QuestionGenStatusResponse response = questionService.submitGenerationTask(
-          1L, new GenerateKnowledgeBaseQuestionsRequest("mid", 5, 2, 3, null));
+          7L, 1L, new GenerateKnowledgeBaseQuestionsRequest("mid", 5, 2, 3, null));
 
       assertThat(response.questionGenStatus()).isEqualTo(QuestionGenStatus.QUEUED);
       assertThat(response.questionGenTaskId()).isNotNull();
@@ -171,10 +171,10 @@ class QuestionGenerationAsyncTest {
     @DisplayName("等待处理时重复提交会被拒绝")
     void shouldRejectWhenAlreadyQueued() {
       KnowledgeBaseEntity kb = buildKb(1L, QuestionGenStatus.QUEUED, "existing-task");
-      when(knowledgeBaseRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(kb));
+      when(knowledgeBaseRepository.findByIdAndUserIdForUpdate(1L, 7L)).thenReturn(Optional.of(kb));
 
       assertThatThrownBy(() -> questionService.submitGenerationTask(
-          1L, new GenerateKnowledgeBaseQuestionsRequest("mid", 5, 2, 3, null)))
+          7L, 1L, new GenerateKnowledgeBaseQuestionsRequest("mid", 5, 2, 3, null)))
           .isInstanceOf(BusinessException.class)
           .hasMessageContaining("正在生成中");
 
@@ -185,10 +185,10 @@ class QuestionGenerationAsyncTest {
     @DisplayName("生成中时重复提交会被拒绝")
     void shouldRejectWhenAlreadyProcessing() {
       KnowledgeBaseEntity kb = buildKb(1L, QuestionGenStatus.PROCESSING, "existing-task");
-      when(knowledgeBaseRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(kb));
+      when(knowledgeBaseRepository.findByIdAndUserIdForUpdate(1L, 7L)).thenReturn(Optional.of(kb));
 
       assertThatThrownBy(() -> questionService.submitGenerationTask(
-          1L, new GenerateKnowledgeBaseQuestionsRequest("mid", 5, 2, 3, null)))
+          7L, 1L, new GenerateKnowledgeBaseQuestionsRequest("mid", 5, 2, 3, null)))
           .isInstanceOf(BusinessException.class)
           .hasMessageContaining("正在生成中");
 
@@ -200,12 +200,12 @@ class QuestionGenerationAsyncTest {
     void shouldAllowResubmitAfterFailed() {
       KnowledgeBaseEntity kb = buildKb(1L, QuestionGenStatus.FAILED, "old-task");
       kb.setQuestionGenError("之前的错误");
-      when(knowledgeBaseRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(kb));
+      when(knowledgeBaseRepository.findByIdAndUserIdForUpdate(1L, 7L)).thenReturn(Optional.of(kb));
       when(knowledgeBaseRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
       when(questionGenStreamProducer.sendGenerateTask(eq(1L), anyString())).thenReturn(true);
 
       QuestionGenStatusResponse response = questionService.submitGenerationTask(
-          1L, new GenerateKnowledgeBaseQuestionsRequest("mid", 5, 2, 3, null));
+          7L, 1L, new GenerateKnowledgeBaseQuestionsRequest("mid", 5, 2, 3, null));
 
       assertThat(response.questionGenStatus()).isEqualTo(QuestionGenStatus.QUEUED);
       assertThat(kb.getQuestionGenError()).isNull();

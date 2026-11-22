@@ -48,11 +48,9 @@ public class KnowledgeBaseQuestionService {
   private final QuestionGenerationStateService questionGenerationStateService;
 
   @Transactional(readOnly = true)
-  public List<KnowledgeBaseQuestionDTO> listQuestions(Long knowledgeBaseId,
-                                                      KnowledgeBaseQuestionStatus status,
-                                                      String category,
-                                                      String difficulty,
-                                                      String keyword) {
+  public List<KnowledgeBaseQuestionDTO> listQuestions(Long userId, Long knowledgeBaseId,
+      KnowledgeBaseQuestionStatus status, String category, String difficulty, String keyword) {
+    getKnowledgeBase(userId, knowledgeBaseId);
     List<KnowledgeBaseQuestionEntity> questions = status == null
         ? questionRepository.findByKnowledgeBase_IdOrderByUpdatedAtDesc(knowledgeBaseId)
         : questionRepository.findByKnowledgeBase_IdAndStatusOrderByUpdatedAtDesc(knowledgeBaseId, status);
@@ -72,14 +70,15 @@ public class KnowledgeBaseQuestionService {
    * 用于前端筛选下拉、开始面试弹窗的方向选择。
    */
   @Transactional(readOnly = true)
-  public List<CategoryCount> listCategories(Long knowledgeBaseId) {
+  public List<CategoryCount> listCategories(Long userId, Long knowledgeBaseId) {
+    getKnowledgeBase(userId, knowledgeBaseId);
     return questionRepository.findCategoryCounts(knowledgeBaseId);
   }
 
   @Transactional(rollbackFor = Exception.class)
-  public KnowledgeBaseQuestionDTO createQuestion(Long knowledgeBaseId,
-                                                 CreateKnowledgeBaseQuestionRequest request) {
-    KnowledgeBaseEntity kb = getKnowledgeBase(knowledgeBaseId);
+  public KnowledgeBaseQuestionDTO createQuestion(Long userId, Long knowledgeBaseId,
+      CreateKnowledgeBaseQuestionRequest request) {
+    KnowledgeBaseEntity kb = getKnowledgeBase(userId, knowledgeBaseId);
     KnowledgeBaseQuestionEntity question = new KnowledgeBaseQuestionEntity();
     question.setKnowledgeBase(kb);
     applyCreateRequest(question, request);
@@ -89,8 +88,9 @@ public class KnowledgeBaseQuestionService {
   }
 
   @Transactional(rollbackFor = Exception.class)
-  public KnowledgeBaseQuestionDTO updateQuestion(Long questionId, UpdateKnowledgeBaseQuestionRequest request) {
-    KnowledgeBaseQuestionEntity question = getQuestion(questionId);
+  public KnowledgeBaseQuestionDTO updateQuestion(Long userId, Long questionId,
+      UpdateKnowledgeBaseQuestionRequest request) {
+    KnowledgeBaseQuestionEntity question = getQuestion(userId, questionId);
     if (request.difficulty() != null) {
       question.setDifficulty(normalizeDifficulty(request.difficulty()));
     }
@@ -134,18 +134,16 @@ public class KnowledgeBaseQuestionService {
   }
 
   @Transactional(rollbackFor = Exception.class)
-  public KnowledgeBaseQuestionDTO updateStatus(Long questionId, KnowledgeBaseQuestionStatus status) {
-    KnowledgeBaseQuestionEntity question = getQuestion(questionId);
+  public KnowledgeBaseQuestionDTO updateStatus(Long userId, Long questionId,
+      KnowledgeBaseQuestionStatus status) {
+    KnowledgeBaseQuestionEntity question = getQuestion(userId, questionId);
     question.setStatus(status);
     return toDTO(questionRepository.save(question));
   }
 
   @Transactional(rollbackFor = Exception.class)
-  public void deleteQuestion(Long questionId) {
-    if (!questionRepository.existsById(questionId)) {
-      throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_NOT_FOUND);
-    }
-    questionRepository.deleteById(questionId);
+  public void deleteQuestion(Long userId, Long questionId) {
+    questionRepository.delete(getQuestion(userId, questionId));
   }
 
   /**
@@ -153,6 +151,7 @@ public class KnowledgeBaseQuestionService {
    * 校验知识库存在且状态允许，更新状态为 QUEUED，然后向 Redis Stream 投递任务。
    */
   public QuestionGenStatusResponse submitGenerationTask(
+      Long userId,
       Long knowledgeBaseId,
       GenerateKnowledgeBaseQuestionsRequest request) {
     String difficulty = normalizeDifficulty(request.difficulty());
@@ -170,15 +169,15 @@ public class KnowledgeBaseQuestionService {
         trimToNull(request.llmProvider())
     );
     QuestionGenStatusResponse response =
-        questionGenerationStateService.createTask(knowledgeBaseId, config);
+        questionGenerationStateService.createTask(userId, knowledgeBaseId, config);
     boolean sent = questionGenStreamProducer.sendGenerateTask(
         knowledgeBaseId, response.questionGenTaskId());
-    return sent ? response : questionGenerationStateService.getStatus(knowledgeBaseId);
+    return sent ? response : questionGenerationStateService.getStatus(userId, knowledgeBaseId);
   }
 
   @Transactional(readOnly = true)
-  public QuestionGenStatusResponse getGenerationStatus(Long knowledgeBaseId) {
-    return questionGenerationStateService.getStatus(knowledgeBaseId);
+  public QuestionGenStatusResponse getGenerationStatus(Long userId, Long knowledgeBaseId) {
+    return questionGenerationStateService.getStatus(userId, knowledgeBaseId);
   }
 
   private void applyCreateRequest(KnowledgeBaseQuestionEntity question,
@@ -223,13 +222,13 @@ public class KnowledgeBaseQuestionService {
     );
   }
 
-  private KnowledgeBaseEntity getKnowledgeBase(Long knowledgeBaseId) {
-    return knowledgeBaseRepository.findById(knowledgeBaseId)
+  private KnowledgeBaseEntity getKnowledgeBase(Long userId, Long knowledgeBaseId) {
+    return knowledgeBaseRepository.findByIdAndUserId(knowledgeBaseId, userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND));
   }
 
-  private KnowledgeBaseQuestionEntity getQuestion(Long questionId) {
-    return questionRepository.findById(questionId)
+  private KnowledgeBaseQuestionEntity getQuestion(Long userId, Long questionId) {
+    return questionRepository.findByIdAndKnowledgeBase_UserId(questionId, userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_QUESTION_NOT_FOUND));
   }
 

@@ -35,10 +35,12 @@ public class QuestionGenerationStateService {
 
   @Transactional(rollbackFor = Exception.class)
   public QuestionGenStatusResponse createTask(
+      Long userId,
       Long knowledgeBaseId,
       QuestionGenerationConfig config
   ) {
-    KnowledgeBaseEntity kb = lockKnowledgeBase(knowledgeBaseId);
+    KnowledgeBaseEntity kb = knowledgeBaseRepository.findByIdAndUserIdForUpdate(knowledgeBaseId, userId)
+        .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND));
     if (kb.getVectorStatus() != VectorStatus.COMPLETED) {
       throw new BusinessException(ErrorCode.BAD_REQUEST, "知识库尚未完成向量化");
     }
@@ -60,8 +62,8 @@ public class QuestionGenerationStateService {
   }
 
   @Transactional(readOnly = true)
-  public QuestionGenStatusResponse getStatus(Long knowledgeBaseId) {
-    KnowledgeBaseEntity kb = knowledgeBaseRepository.findById(knowledgeBaseId)
+  public QuestionGenStatusResponse getStatus(Long userId, Long knowledgeBaseId) {
+    KnowledgeBaseEntity kb = knowledgeBaseRepository.findByIdAndUserId(knowledgeBaseId, userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND));
     return toResponse(kb, readConfigOrNull(kb.getQuestionGenConfig()));
   }
@@ -176,11 +178,6 @@ public class QuestionGenerationStateService {
     kb.setQuestionGenStatus(QuestionGenStatus.QUEUED);
     kb.setQuestionGenUpdatedAt(LocalDateTime.now());
     return true;
-  }
-
-  private KnowledgeBaseEntity lockKnowledgeBase(Long knowledgeBaseId) {
-    return knowledgeBaseRepository.findByIdForUpdate(knowledgeBaseId)
-        .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND));
   }
 
   private KnowledgeBaseEntity lockKnowledgeBaseOrNull(Long knowledgeBaseId) {

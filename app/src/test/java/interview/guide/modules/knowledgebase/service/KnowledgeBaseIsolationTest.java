@@ -1,16 +1,27 @@
 package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.mapper.KnowledgeBaseMapperImpl;
+import interview.guide.modules.interview.service.InterviewSessionService;
+import interview.guide.modules.knowledgebase.listener.QuestionGenStreamProducer;
+import interview.guide.modules.knowledgebase.model.CreateKnowledgeBaseInterviewRequest;
+import interview.guide.modules.knowledgebase.model.CreateKnowledgeBaseQuestionRequest;
+import interview.guide.modules.knowledgebase.model.GenerateKnowledgeBaseQuestionsRequest;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseListItemDTO;
+import interview.guide.modules.knowledgebase.model.KnowledgeBaseQuestionDTO;
+import interview.guide.modules.knowledgebase.model.KnowledgeBaseQuestionStatus;
+import interview.guide.modules.knowledgebase.model.QuestionGenStatus;
+import interview.guide.modules.knowledgebase.model.UpdateKnowledgeBaseQuestionRequest;
 import interview.guide.modules.knowledgebase.model.VectorStatus;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import jakarta.persistence.EntityManagerFactory;
 import java.util.List;
 import java.util.Map;
 import javax.sql.DataSource;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +36,7 @@ import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,6 +44,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @SpringJUnitConfig(KnowledgeBaseIsolationTest.Config.class)
 @Transactional
@@ -42,6 +55,14 @@ class KnowledgeBaseIsolationTest {
   private KnowledgeBaseListService listService;
   @Autowired
   private FileStorageService storageService;
+  @Autowired
+  private KnowledgeBaseQuestionService questionService;
+  @Autowired
+  private KnowledgeBaseInterviewService interviewService;
+  @Autowired
+  private QuestionGenStreamProducer questionProducer;
+  @Autowired
+  private InterviewSessionService interviewSessionService;
 
   @Test
   @DisplayName("知识库按账号去重，列表、搜索、下载和检索校验数据归属")
@@ -74,6 +95,63 @@ class KnowledgeBaseIsolationTest {
     verify(storageService, never()).downloadFile(anyString());
   }
 
+  @Test
+  @DisplayName("知识库题目、生成状态和面试只允许所属账号操作")
+  void isolatesQuestionsAndInterviews() {
+    var own = saveKnowledgeBase(7L, "我的文档", "我的分类");
+    var other = saveKnowledgeBase(8L, "他的文档", "他的分类");
+    var createQuestion = new CreateKnowledgeBaseQuestionRequest(
+        "mid", null, "JVM", "解释垃圾回收", null, null, List.of(), null, List.of(), null,
+        KnowledgeBaseQuestionStatus.ACTIVE);
+    var ownQuestion = questionService.createQuestion(7L, own.getId(), createQuestion);
+    var otherQuestion = questionService.createQuestion(8L, other.getId(), createQuestion);
+    var editQuestion = new UpdateKnowledgeBaseQuestionRequest(
+        null, null, null, "新的题干", null, null, null, null, null, null, null);
+
+    assertThat(questionService.listQuestions(7L, own.getId(), null, null, null, null))
+        .extracting(KnowledgeBaseQuestionDTO::id).containsExactly(ownQuestion.id());
+    assertThat(questionService.updateQuestion(7L, ownQuestion.id(), editQuestion).question())
+        .isEqualTo("新的题干");
+    assertThat(questionService.getGenerationStatus(7L, own.getId()).questionGenStatus())
+        .isEqualTo(QuestionGenStatus.NONE);
+    assertThat(interviewService.getCapacity(7L, own.getId(), "JVM", "mid", 1).followUpOptions())
+        .anyMatch(option -> option.followUpCount() == 0 && option.selectable());
+
+    assertNotFound(() -> questionService.listQuestions(7L, other.getId(), null, null, null, null),
+        ErrorCode.KNOWLEDGE_BASE_NOT_FOUND);
+    assertNotFound(() -> questionService.listCategories(7L, other.getId()),
+        ErrorCode.KNOWLEDGE_BASE_NOT_FOUND);
+    assertNotFound(() -> questionService.createQuestion(7L, other.getId(), createQuestion),
+        ErrorCode.KNOWLEDGE_BASE_NOT_FOUND);
+    assertNotFound(() -> questionService.updateQuestion(7L, otherQuestion.id(), editQuestion),
+        ErrorCode.INTERVIEW_QUESTION_NOT_FOUND);
+    assertNotFound(() -> questionService.updateStatus(7L, otherQuestion.id(),
+        KnowledgeBaseQuestionStatus.DRAFT), ErrorCode.INTERVIEW_QUESTION_NOT_FOUND);
+    assertNotFound(() -> questionService.deleteQuestion(7L, otherQuestion.id()),
+        ErrorCode.INTERVIEW_QUESTION_NOT_FOUND);
+    assertNotFound(() -> questionService.getGenerationStatus(7L, other.getId()),
+        ErrorCode.KNOWLEDGE_BASE_NOT_FOUND);
+    assertNotFound(() -> questionService.submitGenerationTask(7L, other.getId(),
+        new GenerateKnowledgeBaseQuestionsRequest("mid", 1, 0, 1, null)),
+        ErrorCode.KNOWLEDGE_BASE_NOT_FOUND);
+    assertNotFound(() -> interviewService.getCapacity(7L, other.getId(), null, "mid", 1),
+        ErrorCode.KNOWLEDGE_BASE_NOT_FOUND);
+    assertNotFound(() -> interviewService.createSession(7L,
+        new CreateKnowledgeBaseInterviewRequest(other.getId(), null, "mid", 1, 0, null)),
+        ErrorCode.KNOWLEDGE_BASE_NOT_FOUND);
+
+    assertThat(questionService.listQuestions(8L, other.getId(), null, null, null, null))
+        .extracting(KnowledgeBaseQuestionDTO::id).containsExactly(otherQuestion.id());
+    assertThat(questionService.getGenerationStatus(8L, other.getId()).questionGenStatus())
+        .isEqualTo(QuestionGenStatus.NONE);
+    verifyNoInteractions(questionProducer, interviewSessionService);
+  }
+
+  private void assertNotFound(ThrowingCallable call, ErrorCode code) {
+    assertThatThrownBy(call).isInstanceOfSatisfying(
+        BusinessException.class, error -> assertThat(error.getCode()).isEqualTo(code.getCode()));
+  }
+
   private KnowledgeBaseEntity saveKnowledgeBase(Long userId, String name, String category) {
     var knowledgeBase = new KnowledgeBaseEntity();
     knowledgeBase.setUserId(userId);
@@ -88,7 +166,9 @@ class KnowledgeBaseIsolationTest {
   @Configuration(proxyBeanMethods = false)
   @EnableJpaRepositories(basePackageClasses = KnowledgeBaseRepository.class)
   @EnableTransactionManagement
-  @Import({KnowledgeBaseListService.class, KnowledgeBaseMapperImpl.class})
+  @Import({KnowledgeBaseListService.class, KnowledgeBaseMapperImpl.class,
+      KnowledgeBaseQuestionService.class, KnowledgeBaseInterviewService.class,
+      QuestionGenerationStateService.class})
   static class Config {
     @Bean
     DataSource dataSource() {
@@ -116,6 +196,21 @@ class KnowledgeBaseIsolationTest {
     @Bean
     FileStorageService fileStorageService() {
       return mock(FileStorageService.class);
+    }
+
+    @Bean
+    ObjectMapper objectMapper() {
+      return new ObjectMapper();
+    }
+
+    @Bean
+    QuestionGenStreamProducer questionGenStreamProducer() {
+      return mock(QuestionGenStreamProducer.class);
+    }
+
+    @Bean
+    InterviewSessionService interviewSessionService() {
+      return mock(InterviewSessionService.class);
     }
   }
 }

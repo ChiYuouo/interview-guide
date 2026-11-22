@@ -39,6 +39,11 @@ public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBaseEnti
     @Query("SELECT k FROM KnowledgeBaseEntity k WHERE k.id = :id")
     Optional<KnowledgeBaseEntity> findByIdForUpdate(@Param("id") Long id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT k FROM KnowledgeBaseEntity k WHERE k.id = :id AND k.userId = :userId")
+    Optional<KnowledgeBaseEntity> findByIdAndUserIdForUpdate(
+        @Param("id") Long id, @Param("userId") Long userId);
+
     /**
      * 按上传时间倒序查找所有知识库
      */

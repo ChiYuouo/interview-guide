@@ -55,7 +55,7 @@ public class KnowledgeBaseInterviewService {
   }
 
   public InterviewSessionDTO createSession(Long userId, CreateKnowledgeBaseInterviewRequest request) {
-    knowledgeBaseRepository.findById(request.knowledgeBaseId())
+    knowledgeBaseRepository.findByIdAndUserId(request.knowledgeBaseId(), userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND));
 
     String category = trimToNull(request.category());
@@ -99,12 +99,13 @@ public class KnowledgeBaseInterviewService {
   }
 
   public KnowledgeBaseInterviewCapacityResponse getCapacity(
+      Long userId,
       Long knowledgeBaseId,
       String category,
       String difficulty,
       int mainQuestionCount
   ) {
-    knowledgeBaseRepository.findById(knowledgeBaseId)
+    knowledgeBaseRepository.findByIdAndUserId(knowledgeBaseId, userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND));
 
     String normalizedCategory = trimToNull(category);

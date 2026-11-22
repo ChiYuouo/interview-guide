@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -51,6 +52,12 @@ class KnowledgeBaseQuestionServiceTest {
   @DisplayName("listQuestions 筛选")
   class ListFiltering {
 
+    @BeforeEach
+    void stubOwnedKnowledgeBase() {
+      when(knowledgeBaseRepository.findByIdAndUserId(1L, 7L))
+          .thenReturn(Optional.of(new KnowledgeBaseEntity()));
+    }
+
     @Test
     @DisplayName("按 category 筛选时只返回该方向的题")
     void shouldFilterByCategory() {
@@ -60,7 +67,7 @@ class KnowledgeBaseQuestionServiceTest {
           .thenReturn(List.of(redis, jvm));
 
       List<KnowledgeBaseQuestionDTO> result =
-          service.listQuestions(1L, null, "Redis", null, null);
+          service.listQuestions(7L, 1L, null, "Redis", null, null);
 
       assertThat(result).hasSize(1);
       assertThat(result.get(0).category()).isEqualTo("Redis");
@@ -73,7 +80,7 @@ class KnowledgeBaseQuestionServiceTest {
           .thenReturn(List.of(entity("Q1", "JVM"), entity("Q2", "Redis")));
 
       List<KnowledgeBaseQuestionDTO> result =
-          service.listQuestions(1L, null, "  ", null, null);
+          service.listQuestions(7L, 1L, null, "  ", null, null);
 
       assertThat(result).hasSize(2);
     }
@@ -87,7 +94,7 @@ class KnowledgeBaseQuestionServiceTest {
           .thenReturn(List.of(question));
 
       List<KnowledgeBaseQuestionDTO> result =
-          service.listQuestions(1L, null, null, null, null);
+          service.listQuestions(7L, 1L, null, null, null, null);
 
       assertThat(result.get(0).followUps()).hasSize(1);
       assertThat(result.get(0).followUps().get(0).question()).isEqualTo("追问1");
