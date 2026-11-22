@@ -4,19 +4,22 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.result.Result;
+import interview.guide.modules.auth.model.AccountPrincipal;
+import interview.guide.modules.resume.service.ResumePersistenceService;
 import interview.guide.modules.voiceinterview.dto.CreateSessionRequest;
 import interview.guide.modules.voiceinterview.dto.SessionMetaDTO;
 import interview.guide.modules.voiceinterview.dto.SessionResponseDTO;
 import interview.guide.modules.voiceinterview.dto.VoiceEvaluationDetailDTO;
 import interview.guide.modules.voiceinterview.dto.VoiceEvaluationStatusDTO;
-import interview.guide.modules.voiceinterview.listener.VoiceEvaluateStreamProducer;
 import interview.guide.modules.voiceinterview.dto.VoiceInterviewMessageDTO;
+import interview.guide.modules.voiceinterview.listener.VoiceEvaluateStreamProducer;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import interview.guide.modules.voiceinterview.service.VoiceInterviewEvaluationService;
 import interview.guide.modules.voiceinterview.service.VoiceInterviewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -50,12 +53,17 @@ public class VoiceInterviewController {
     private final VoiceInterviewService voiceInterviewService;
     private final VoiceInterviewEvaluationService evaluationService;
     private final VoiceEvaluateStreamProducer voiceEvaluateStreamProducer;
+    private final ResumePersistenceService resumes;
 
     /**
      * Create a new voice interview session
      */
     @PostMapping("/sessions")
-    public Result<SessionResponseDTO> createSession(@Valid @RequestBody CreateSessionRequest request) {
+    public Result<SessionResponseDTO> createSession(
+        @AuthenticationPrincipal AccountPrincipal account, @Valid @RequestBody CreateSessionRequest request) {
+        if (request.getResumeId() != null) {
+            resumes.requireOwnedResume(account.getUserId(), request.getResumeId());
+        }
         log.info("Creating voice interview session for role: {}", request.getRoleType());
         SessionResponseDTO session = voiceInterviewService.createSession(request);
         return Result.success(session);

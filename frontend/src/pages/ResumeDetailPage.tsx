@@ -11,13 +11,14 @@ import {CheckSquare, ChevronLeft, Clock, Download, MessageSquare, Mic} from 'luc
 interface ResumeDetailPageProps {
   resumeId: number;
   onBack: () => void;
-  onStartInterview: (resumeId: number) => void;
+  onStartInterview?: (resumeId: number) => void;
 }
 
 type TabType = 'analysis' | 'interview';
 type DetailViewType = 'list' | 'interviewDetail';
 
 export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }: ResumeDetailPageProps) {
+  const canInterview = onStartInterview !== undefined;
   const location = useLocation();
   const [resume, setResume] = useState<ResumeDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -89,7 +90,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
   // 检查是否需要自动打开面试详情
   useEffect(() => {
     const viewInterview = (location.state as { viewInterview?: string })?.viewInterview;
-    if (viewInterview && resume) {
+    if (canInterview && viewInterview && resume) {
       // 切换到面试标签页
       setActiveTab('interview');
       // 加载并显示面试详情
@@ -107,7 +108,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
       };
       loadAndViewInterview();
     }
-  }, [location.state, resume]);
+  }, [canInterview, location.state, resume]);
 
   const handleExportAnalysisPdf = async () => {
     setExporting('analysis');
@@ -269,7 +270,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
               {exporting === selectedInterview.sessionId ? '导出中...' : '导出 PDF'}
             </motion.button>
           )}
-          {detailView !== 'interviewDetail' && (
+          {onStartInterview && detailView !== 'interviewDetail' && (
             <motion.button
               onClick={() => onStartInterview(resumeId)}
               className="px-5 py-2.5 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-medium shadow-lg shadow-primary-500/30 hover:shadow-xl transition-all flex items-center gap-2"
@@ -284,7 +285,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
       </div>
 
       {/* 标签页切换 - 仅在非面试详情时显示 */}
-      {detailView !== 'interviewDetail' && (
+      {canInterview && detailView !== 'interviewDetail' && (
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-2 mb-6 inline-flex gap-1">
           {tabs.map((tab) => (
             <motion.button
@@ -340,7 +341,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
                   onReanalyze={handleReanalyze}
                   reanalyzing={reanalyzing}
                 />
-              ) : (
+              ) : onStartInterview && (
                   <InterviewPanel
                       interviews={resume.interviews || []}
                   onStartInterview={() => onStartInterview(resumeId)}

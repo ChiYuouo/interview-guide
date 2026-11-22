@@ -10,6 +10,7 @@ import { ROUTES } from '../constants/routes';
 
 interface HistoryListProps {
   onSelectResume: (id: number) => void;
+  canInterview: boolean;
 }
 
 function isAnalyzing(status?: string): boolean {
@@ -41,7 +42,7 @@ function resumesEqual(a: ResumeListItem[], b: ResumeListItem[]): boolean {
   return true;
 }
 
-export default function HistoryList({onSelectResume}: HistoryListProps) {
+export default function HistoryList({onSelectResume, canInterview}: HistoryListProps) {
   const navigate = useNavigate();
   const [resumes, setResumes] = useState<ResumeListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,13 +126,15 @@ export default function HistoryList({onSelectResume}: HistoryListProps) {
             <Upload className="w-4 h-4" />
             上传简历
           </button>
-          <button
-            onClick={() => navigate('/interview-hub')}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-          >
-            <Sparkles className="w-4 h-4" />
-            模拟面试
-          </button>
+          {canInterview && (
+            <button
+              onClick={() => navigate('/interview-hub')}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+            >
+              <Sparkles className="w-4 h-4" />
+              模拟面试
+            </button>
+          )}
         </div>
       </div>
 

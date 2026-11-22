@@ -109,13 +109,15 @@ export default function Layout({username, admin, onLogout}: LayoutProps) {
     });
   };
 
+  const resumeNav = { id: 'resumes', path: ROUTES.resumeHistory, label: '简历管理', icon: FileStack, description: '管理简历，AI 分析' };
+
   // 按业务模块组织的导航项
   const navGroups: NavGroup[] = admin ? [
     {
       id: 'interview',
       title: '面试准备',
       items: [
-        { id: 'resumes', path: '/history', label: '简历管理', icon: FileStack, description: '管理简历，AI 分析' },
+        resumeNav,
         { id: 'interview-hub', path: '/interview-hub', label: '模拟面试', icon: Sparkles, description: '文字/语音面试练习' },
         { id: 'interviews', path: '/interviews', label: '面试记录', icon: Users, description: '查看面试历史' },
         scheduleNav,
@@ -137,7 +139,7 @@ export default function Layout({username, admin, onLogout}: LayoutProps) {
         { id: 'settings', path: '/settings', label: '设置', icon: Settings, description: '管理模型和语音服务' },
       ],
     },
-  ] : [{ id: 'interview', title: '面试准备', items: [scheduleNav] }];
+  ] : [{ id: 'interview', title: '面试准备', items: [resumeNav, scheduleNav] }];
 
   // 判断当前页面是否匹配导航项
   const isActive = (path: string) => {

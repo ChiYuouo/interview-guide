@@ -1,19 +1,44 @@
 package interview.guide.modules.auth;
 
+import interview.guide.common.config.AppConfigProperties;
 import interview.guide.common.config.CorsConfig;
 import interview.guide.common.config.CorsProperties;
 import interview.guide.common.config.SecurityConfig;
 import interview.guide.common.exception.GlobalExceptionHandler;
+import interview.guide.common.transaction.TransactionalExecutor;
+import interview.guide.infrastructure.export.PdfExportService;
+import interview.guide.infrastructure.file.FileHashService;
+import interview.guide.infrastructure.file.FileStorageService;
+import interview.guide.infrastructure.file.FileValidationService;
+import interview.guide.infrastructure.mapper.InterviewMapperImpl;
+import interview.guide.infrastructure.mapper.ResumeMapperImpl;
 import interview.guide.modules.auth.model.LoginRequest;
 import interview.guide.modules.auth.model.UserAccountEntity;
 import interview.guide.modules.auth.repository.UserAccountRepository;
 import interview.guide.modules.auth.service.AccountService;
 import interview.guide.modules.auth.service.AuthService;
+import interview.guide.modules.interview.InterviewController;
+import interview.guide.modules.interview.service.InterviewHistoryService;
+import interview.guide.modules.interview.service.InterviewPersistenceService;
+import interview.guide.modules.interview.service.InterviewSessionService;
 import interview.guide.modules.interviewschedule.InterviewScheduleController;
 import interview.guide.modules.interviewschedule.model.InterviewScheduleEntity;
 import interview.guide.modules.interviewschedule.repository.InterviewScheduleRepository;
 import interview.guide.modules.interviewschedule.service.InterviewParseService;
 import interview.guide.modules.interviewschedule.service.InterviewScheduleService;
+import interview.guide.modules.resume.ResumeController;
+import interview.guide.modules.resume.listener.AnalyzeStreamProducer;
+import interview.guide.modules.resume.model.ResumeEntity;
+import interview.guide.modules.resume.repository.ResumeRepository;
+import interview.guide.modules.resume.service.ResumeDeleteService;
+import interview.guide.modules.resume.service.ResumeHistoryService;
+import interview.guide.modules.resume.service.ResumeParseService;
+import interview.guide.modules.resume.service.ResumePersistenceService;
+import interview.guide.modules.resume.service.ResumeUploadService;
+import interview.guide.modules.voiceinterview.controller.VoiceInterviewController;
+import interview.guide.modules.voiceinterview.listener.VoiceEvaluateStreamProducer;
+import interview.guide.modules.voiceinterview.service.VoiceInterviewEvaluationService;
+import interview.guide.modules.voiceinterview.service.VoiceInterviewService;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.servlet.http.Cookie;
 import java.util.Map;
@@ -32,6 +57,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
@@ -49,10 +75,15 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -69,6 +100,8 @@ class AuthIntegrationTest {
   private static final String USERS_PATH = "/api/auth/users";
   private static final String SCHEDULE_PATH = "/api/interview-schedule";
   private static final int SCHEDULE_NOT_FOUND = 9001;
+  private static final String RESUME_PATH = "/api/resumes";
+  private static final int RESUME_NOT_FOUND = 2001;
 
   @Autowired
   private WebApplicationContext context;
@@ -230,11 +263,80 @@ class AuthIntegrationTest {
   }
 
   @Test
+  @DisplayName("简历按账号去重，详情、导出、重试与删除校验归属")
+  void isolatesResumes() throws Exception {
+    var admin = csrf(login("admin"));
+    createUser(admin, "resume-alice");
+    createUser(admin, "resume-bob");
+    var alice = csrf(login("resume-alice"));
+    var bob = csrf(login("resume-bob"));
+
+    mvc.perform(get(RESUME_PATH)).andExpect(status().isUnauthorized());
+    mvc.perform(get(RESUME_PATH + "/1/detail").session(admin.session()))
+        .andExpect(jsonPath("$.data.filename").value("旧简历.txt"));
+    mvc.perform(get(RESUME_PATH + "/1/detail").session(alice.session()))
+        .andExpect(jsonPath("$.code").value(RESUME_NOT_FOUND));
+
+    long aliceId = uploadResume(alice, "alice.txt", false);
+    assertThat(uploadResume(alice, "renamed.txt", true)).isEqualTo(aliceId);
+    long bobId = uploadResume(bob, "bob.txt", false);
+    assertThat(bobId).isNotEqualTo(aliceId);
+
+    mvc.perform(get(RESUME_PATH).session(alice.session()))
+        .andExpect(jsonPath("$.data.length()").value(1))
+        .andExpect(jsonPath("$.data[0].id").value((int) aliceId))
+        .andExpect(jsonPath("$.data[0].accessCount").value(2));
+    mvc.perform(get(RESUME_PATH).session(bob.session()))
+        .andExpect(jsonPath("$.data.length()").value(1))
+        .andExpect(jsonPath("$.data[0].id").value((int) bobId));
+
+    var alicePath = RESUME_PATH + "/" + aliceId;
+    mvc.perform(get(alicePath + "/detail").session(alice.session()))
+        .andExpect(jsonPath("$.data.filename").value("alice.txt"));
+    mvc.perform(get(alicePath + "/detail").session(admin.session()))
+        .andExpect(jsonPath("$.code").value(RESUME_NOT_FOUND));
+    for (var suffix : new String[]{"/detail", "/export"}) {
+      mvc.perform(get(alicePath + suffix).session(bob.session()))
+          .andExpect(jsonPath("$.code").value(RESUME_NOT_FOUND));
+    }
+    mvc.perform(post(alicePath + "/reanalyze").session(bob.session()).header(bob.headerName(), bob.token()))
+        .andExpect(jsonPath("$.code").value(RESUME_NOT_FOUND));
+    mvc.perform(delete(alicePath).session(bob.session()).header(bob.headerName(), bob.token()))
+        .andExpect(jsonPath("$.code").value(RESUME_NOT_FOUND));
+    mvc.perform(get("/api/interview/sessions/unfinished/" + aliceId).session(admin.session()))
+        .andExpect(jsonPath("$.code").value(RESUME_NOT_FOUND));
+    mvc.perform(post("/api/interview/sessions").session(admin.session()).header(admin.headerName(), admin.token())
+            .contentType("application/json").content(mapper.writeValueAsString(Map.of(
+                "resumeId", aliceId, "questionCount", 3, "skillId", "java-backend"))))
+        .andExpect(jsonPath("$.code").value(RESUME_NOT_FOUND));
+    mvc.perform(post("/api/voice-interview/sessions").session(admin.session())
+            .header(admin.headerName(), admin.token()).contentType("application/json")
+            .content(mapper.writeValueAsString(Map.of("resumeId", aliceId))))
+        .andExpect(jsonPath("$.code").value(RESUME_NOT_FOUND));
+    mvc.perform(post(alicePath + "/reanalyze").session(alice.session()).header(alice.headerName(), alice.token()))
+        .andExpect(jsonPath("$.code").value(200));
+    mvc.perform(delete(alicePath).session(alice.session()).header(alice.headerName(), alice.token()))
+        .andExpect(jsonPath("$.code").value(200));
+    mvc.perform(get(RESUME_PATH + "/" + bobId + "/detail").session(bob.session()))
+        .andExpect(jsonPath("$.data.filename").value("bob.txt"));
+  }
+
+  private long uploadResume(CsrfSession owner, String filename, boolean duplicate) throws Exception {
+    var file = new MockMultipartFile("file", filename, "text/plain", new byte[]{1, 2, 3});
+    var result = mvc.perform(multipart(RESUME_PATH + "/upload").file(file).session(owner.session())
+            .header(owner.headerName(), owner.token()))
+        .andExpect(jsonPath("$.code").value(200))
+        .andExpect(jsonPath("$.data.duplicate").value(duplicate))
+        .andReturn();
+    return mapper.readTree(result.getResponse().getContentAsByteArray()).at("/data/storage/resumeId").asLong();
+  }
+
+  @Test
   @DisplayName("普通账号无法开户或访问尚未隔离的模块")
   void restrictsNormalAccounts() throws Exception {
     createUser(csrf(login("admin")), "trial");
     var trial = csrf(login("trial"));
-    for (var path : new String[]{"/api/resumes", "/api/knowledgebase", "/api/llm-provider",
+    for (var path : new String[]{"/api/knowledgebase", "/api/llm-provider",
         "/api/interview/sessions", "/ws/voice-interview/42"}) {
       mvc.perform(get(path).session(trial.session())).andExpect(status().isForbidden());
     }
@@ -298,12 +400,15 @@ class AuthIntegrationTest {
   @EnableWebMvc
   @EnableTransactionManagement(proxyTargetClass = true)
   @EnableJpaRepositories(basePackageClasses = {
-      UserAccountRepository.class, InterviewScheduleRepository.class
+      UserAccountRepository.class, InterviewScheduleRepository.class, ResumeRepository.class
   })
-  @EnableConfigurationProperties(CorsProperties.class)
+  @EnableConfigurationProperties({CorsProperties.class, AppConfigProperties.class})
   @Import({SecurityConfig.class, CorsConfig.class, AuthController.class, AuthService.class,
       AccountService.class, GlobalExceptionHandler.class, InterviewScheduleController.class,
-      InterviewScheduleService.class})
+      InterviewScheduleService.class, ResumeController.class, ResumeUploadService.class,
+      ResumeHistoryService.class, ResumeDeleteService.class, ResumePersistenceService.class,
+      TransactionalExecutor.class, FileHashService.class, ResumeMapperImpl.class, InterviewMapperImpl.class,
+      InterviewController.class, VoiceInterviewController.class})
   static class WebConfig {
     @Bean
     SingleConnectionDataSource dataSource() {
@@ -330,8 +435,50 @@ class AuthIntegrationTest {
           INSERT INTO interview_schedule (company_name, position, interview_time, status)
           VALUES ('迁移前日程', 'Java', TIMESTAMP '2035-01-01 09:00:00', 'PENDING')
           """);
-      new ResourceDatabasePopulator(new ClassPathResource(
-          "db/migration/V20261122__isolate_interview_schedules.sql")).execute(dataSource);
+      jdbc.execute("""
+          CREATE TABLE resumes (
+            id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            access_count INTEGER,
+            analyze_error VARCHAR(500),
+            analyze_status VARCHAR(20),
+            analyze_updated_at TIMESTAMP(6),
+            analyze_recovery_count INTEGER NOT NULL DEFAULT 0,
+            analyze_attempt_id VARCHAR(36),
+            content_type VARCHAR(255),
+            file_hash VARCHAR(64) NOT NULL,
+            file_size BIGINT,
+            last_accessed_at TIMESTAMP(6),
+            original_filename VARCHAR(255) NOT NULL,
+            resume_text TEXT,
+            storage_key VARCHAR(500),
+            storage_url VARCHAR(1000),
+            uploaded_at TIMESTAMP(6) NOT NULL,
+            CONSTRAINT idx_resume_hash UNIQUE (file_hash)
+          )
+          """);
+      jdbc.execute("""
+          CREATE TABLE resume_analyses (
+            id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+            analyzed_at TIMESTAMP(6) NOT NULL,
+            content_score INTEGER,
+            expression_score INTEGER,
+            overall_score INTEGER,
+            project_score INTEGER,
+            skill_match_score INTEGER,
+            strengths_json TEXT,
+            structure_score INTEGER,
+            suggestions_json TEXT,
+            summary TEXT,
+            resume_id BIGINT NOT NULL REFERENCES resumes(id)
+          )
+          """);
+      jdbc.update("""
+          INSERT INTO resumes (file_hash, original_filename, uploaded_at)
+          VALUES ('legacy-hash', '旧简历.txt', CURRENT_TIMESTAMP)
+          """);
+      new ResourceDatabasePopulator(
+          new ClassPathResource("db/migration/V20261122__isolate_interview_schedules.sql"),
+          new ClassPathResource("db/migration/V20261123__isolate_resumes.sql")).execute(dataSource);
       return dataSource;
     }
 
@@ -340,9 +487,12 @@ class AuthIntegrationTest {
       var factory = new LocalContainerEntityManagerFactoryBean();
       factory.setDataSource(dataSource);
       factory.setPackagesToScan(UserAccountEntity.class.getPackageName(),
-          InterviewScheduleEntity.class.getPackageName());
+          InterviewScheduleEntity.class.getPackageName(), ResumeEntity.class.getPackageName());
       factory.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
-      factory.setJpaPropertyMap(Map.of("hibernate.hbm2ddl.auto", "validate"));
+      factory.setJpaPropertyMap(Map.of(
+          "hibernate.hbm2ddl.auto", "validate",
+          "hibernate.physical_naming_strategy",
+          "org.hibernate.boot.model.naming.PhysicalNamingStrategySnakeCaseImpl"));
       return factory;
     }
 
@@ -354,6 +504,69 @@ class AuthIntegrationTest {
     @Bean
     InterviewParseService parseService() {
       return mock(InterviewParseService.class);
+    }
+
+    @Bean
+    ResumeParseService resumeParseService() {
+      var parser = mock(ResumeParseService.class);
+      when(parser.detectContentType(any())).thenReturn("text/plain");
+      when(parser.parseResume(any())).thenReturn("测试简历正文");
+      return parser;
+    }
+
+    @Bean
+    FileStorageService fileStorageService() {
+      var storage = mock(FileStorageService.class);
+      when(storage.uploadResume(any())).thenAnswer(call -> UUID.randomUUID().toString());
+      when(storage.getFileUrl(anyString())).thenAnswer(call -> "https://example.test/" + call.getArgument(0));
+      return storage;
+    }
+
+    @Bean
+    FileValidationService fileValidationService() {
+      return mock(FileValidationService.class);
+    }
+
+    @Bean
+    AnalyzeStreamProducer analyzeStreamProducer() {
+      var producer = mock(AnalyzeStreamProducer.class);
+      when(producer.sendAnalyzeTask(anyLong())).thenReturn(true);
+      return producer;
+    }
+
+    @Bean
+    InterviewPersistenceService interviewPersistenceService() {
+      return mock(InterviewPersistenceService.class);
+    }
+
+    @Bean
+    InterviewSessionService interviewSessionService() {
+      return mock(InterviewSessionService.class);
+    }
+
+    @Bean
+    InterviewHistoryService interviewHistoryService() {
+      return mock(InterviewHistoryService.class);
+    }
+
+    @Bean
+    VoiceInterviewService voiceInterviewService() {
+      return mock(VoiceInterviewService.class);
+    }
+
+    @Bean
+    VoiceInterviewEvaluationService voiceInterviewEvaluationService() {
+      return mock(VoiceInterviewEvaluationService.class);
+    }
+
+    @Bean
+    VoiceEvaluateStreamProducer voiceEvaluateStreamProducer() {
+      return mock(VoiceEvaluateStreamProducer.class);
+    }
+
+    @Bean
+    PdfExportService pdfExportService() {
+      return mock(PdfExportService.class);
     }
 
     @Bean

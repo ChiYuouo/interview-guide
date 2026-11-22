@@ -28,12 +28,17 @@ public interface ResumeRepository extends JpaRepository<ResumeEntity, Long> {
     /**
      * 根据文件哈希查找简历（用于去重）
      */
-    Optional<ResumeEntity> findByFileHash(String fileHash);
-    
-    /**
-     * 检查文件哈希是否存在
-     */
-    boolean existsByFileHash(String fileHash);
+    Optional<ResumeEntity> findByUserIdAndFileHash(Long userId, String fileHash);
+
+    Optional<ResumeEntity> findByIdAndUserId(Long id, Long userId);
+
+    List<ResumeEntity> findByUserId(Long userId);
+
+    @Modifying
+    @Query("UPDATE ResumeEntity r SET r.accessCount = coalesce(r.accessCount, 0) + 1, r.lastAccessedAt = :now "
+        + "WHERE r.id = :id AND r.userId = :userId")
+    int recordDuplicateAccess(@Param("id") Long id, @Param("userId") Long userId,
+                              @Param("now") LocalDateTime now);
 
     // ========== P1-07 条件状态更新（终态不被覆盖，多实例安全） ==========
 
@@ -112,12 +117,6 @@ public interface ResumeRepository extends JpaRepository<ResumeEntity, Long> {
     @Modifying
     @Query("UPDATE ResumeEntity r SET r.analyzeRecoveryCount = r.analyzeRecoveryCount + 1 WHERE r.id = :id")
     int incrementAnalyzeRecoveryCount(@Param("id") Long id);
-
-    /** 手动重试清零恢复计数 */
-    @Transactional
-    @Modifying
-    @Query("UPDATE ResumeEntity r SET r.analyzeRecoveryCount = 0 WHERE r.id = :id")
-    int resetAnalyzeRecoveryCount(@Param("id") Long id);
 
     /** 卡住任务扫描（带每轮上限） */
     @Query("SELECT r FROM ResumeEntity r WHERE r.analyzeStatus = :status AND r.analyzeUpdatedAt < :threshold ORDER BY r.analyzeUpdatedAt ASC")

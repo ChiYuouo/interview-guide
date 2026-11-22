@@ -5,6 +5,7 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.transaction.TransactionalExecutor;
+import interview.guide.infrastructure.file.FileHashService;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.file.FileValidationService;
 import interview.guide.modules.interview.model.ResumeAnalysisResponse;
@@ -13,8 +14,11 @@ import interview.guide.modules.resume.model.ResumeEntity;
 import interview.guide.modules.resume.repository.ResumeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
 
@@ -33,6 +37,7 @@ public class ResumeUploadService {
     private final ResumePersistenceService persistenceService;
     private final AppConfigProperties appConfig;
     private final FileValidationService fileValidationService;
+    private final FileHashService fileHashService;
     private final AnalyzeStreamProducer analyzeStreamProducer;
     private final ResumeRepository resumeRepository;
     private final TransactionalExecutor transactionalExecutor;
@@ -45,7 +50,7 @@ public class ResumeUploadService {
      * @param file 简历文件
      * @return 上传结果（分析将异步进行）
      */
-    public Map<String, Object> uploadAndAnalyze(org.springframework.web.multipart.MultipartFile file) {
+    public Map<String, Object> uploadAndAnalyze(Long userId, MultipartFile file) {
         long startTime = System.currentTimeMillis();
 
         // 1. 验证文件
@@ -61,7 +66,8 @@ public class ResumeUploadService {
         validateContentType(contentType);
 
         // 3. 检查简历是否已存在（去重）
-        Optional<ResumeEntity> existingResume = persistenceService.findExistingResume(file);
+        String fileHash = fileHashService.calculateHash(file);
+        Optional<ResumeEntity> existingResume = persistenceService.findExistingResume(userId, fileHash);
         if (existingResume.isPresent()) {
             log.info("简历上传处理完成（重复）: {} - 耗时: {}ms",
                 fileName, System.currentTimeMillis() - startTime);
@@ -87,8 +93,8 @@ public class ResumeUploadService {
         // 6. 保存简历到数据库（状态为 PENDING）；失败时按 fileKey 补偿删除孤儿对象（简历是先解析再上传，补偿只包在 S3 成功之后）
         ResumeEntity savedResume;
         try {
-            savedResume = persistenceService.saveResume(file, resumeText, fileKey, fileUrl);
-        } catch (Exception dbError) {
+            savedResume = persistenceService.saveResume(userId, fileHash, file, resumeText, fileKey, fileUrl);
+        } catch (RuntimeException dbError) {
             try {
                 storageService.deleteResume(fileKey);
                 log.warn("数据库保存失败已补偿删除孤儿对象: fileKey={}", fileKey);
@@ -96,7 +102,15 @@ public class ResumeUploadService {
                 log.error("补偿删除孤儿对象失败，需人工清理: fileKey={}, error={}",
                     fileKey, cleanupError.getMessage(), cleanupError);
             }
-            throw dbError;
+            // 并发上传时，唯一约束保留先提交的简历，其余请求复用该记录。
+            if (dbError instanceof DataIntegrityViolationException) {
+                var duplicate = persistenceService.findExistingResume(userId, fileHash);
+                if (duplicate.isPresent()) {
+                    return handleDuplicateResume(duplicate.get());
+                }
+            }
+            log.error("保存简历失败", dbError);
+            throw new BusinessException(ErrorCode.RESUME_UPLOAD_FAILED, "保存简历失败", dbError);
         }
 
         // 7. 发送分析任务到 Redis Stream；投递失败时文件与实体保留（手动重试依据），返回真实状态
@@ -189,23 +203,16 @@ public class ResumeUploadService {
      *
      * @param resumeId 简历ID
      */
-    public void reanalyze(Long resumeId) {
-        resumeRepository.findById(resumeId)
-            .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND, "简历不存在"));
-
-        log.info("开始重新分析简历: resumeId={}", resumeId);
-
+    public void reanalyze(Long userId, Long resumeId) {
         transactionalExecutor.run(() -> {
-            ResumeEntity resume = resumeRepository.findById(resumeId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.RESUME_NOT_FOUND, "简历不存在"));
+            ResumeEntity resume = persistenceService.requireOwnedResume(userId, resumeId);
             resume.setAnalyzeStatus(AsyncTaskStatus.PENDING);
             resume.setAnalyzeError(null);
             resume.setAnalyzeAttemptId(null);
-            resume.setAnalyzeUpdatedAt(java.time.LocalDateTime.now());
+            resume.setAnalyzeUpdatedAt(LocalDateTime.now());
+            resume.setAnalyzeRecoveryCount(0);
             resumeRepository.save(resume);
         });
-        // 手动重试清零自动恢复计数
-        resumeRepository.resetAnalyzeRecoveryCount(resumeId);
 
         // 事务提交后再发送分析任务到 Stream；投递失败必须让调用方感知
         if (!analyzeStreamProducer.sendAnalyzeTask(resumeId)) {

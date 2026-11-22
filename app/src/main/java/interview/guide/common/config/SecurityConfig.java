@@ -88,6 +88,7 @@ public class SecurityConfig {
             .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/auth/session").authenticated()
             .requestMatchers("/api/interview-schedule", "/api/interview-schedule/**").authenticated()
+            .requestMatchers("/api/resumes", "/api/resumes/**").authenticated()
             .anyRequest().hasRole("ADMIN"))
         .exceptionHandling(errors -> errors
             .authenticationEntryPoint((request, response, error) ->

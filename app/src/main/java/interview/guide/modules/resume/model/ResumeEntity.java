@@ -1,7 +1,16 @@
 package interview.guide.modules.resume.model;
 
 import interview.guide.common.model.AsyncTaskStatus;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.LocalDateTime;
 
@@ -10,8 +19,8 @@ import java.time.LocalDateTime;
  * Resume Entity for deduplication and persistence
  */
 @Entity
-@Table(name = "resumes", indexes = {
-    @Index(name = "idx_resume_hash", columnList = "fileHash", unique = true)
+@Table(name = "resumes", uniqueConstraints = {
+    @UniqueConstraint(name = "uk_resumes_user_file_hash", columnNames = {"user_id", "file_hash"})
 })
 public class ResumeEntity {
     
@@ -19,8 +28,11 @@ public class ResumeEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    // 文件内容的SHA-256哈希值，用于去重
-    @Column(nullable = false, unique = true, length = 64)
+    @Column(name = "user_id", nullable = false, updatable = false)
+    private Long userId;
+
+    // 文件内容的 SHA-256 哈希值，用于账号内去重
+    @Column(name = "file_hash", nullable = false, length = 64)
     private String fileHash;
     
     // 原始文件名
@@ -96,6 +108,10 @@ public class ResumeEntity {
     
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
     }
     
     public String getFileHash() {
@@ -178,11 +194,6 @@ public class ResumeEntity {
         this.accessCount = accessCount;
     }
     
-    public void incrementAccessCount() {
-        this.accessCount++;
-        this.lastAccessedAt = LocalDateTime.now();
-    }
-
     public AsyncTaskStatus getAnalyzeStatus() {
         return analyzeStatus;
     }

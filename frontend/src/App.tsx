@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { BrowserRouter, matchPath, Navigate, Route, Routes, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import Layout from './components/Layout';
 import { useEffect, useState, Suspense, lazy } from 'react';
 import { historyApi, type InterviewDetail } from './api/history';
@@ -45,18 +45,18 @@ function UploadPageWrapper() {
 }
 
 // 历史记录列表包装器
-function HistoryListWrapper() {
+function HistoryListWrapper({ canInterview }: { canInterview: boolean }) {
   const navigate = useNavigate();
 
   const handleSelectResume = (id: number) => {
     navigate(`/history/${id}`);
   };
 
-  return <HistoryList onSelectResume={handleSelectResume} />;
+  return <HistoryList onSelectResume={handleSelectResume} canInterview={canInterview} />;
 }
 
 // 简历详情包装器
-function ResumeDetailWrapper() {
+function ResumeDetailWrapper({ canInterview }: { canInterview: boolean }) {
   const { resumeId } = useParams<{ resumeId: string }>();
   const navigate = useNavigate();
   const { openInterviewModalWithResume } = useOutletContext<{ openInterviewModalWithResume: (resumeId: number) => void }>();
@@ -69,15 +69,11 @@ function ResumeDetailWrapper() {
     navigate('/history');
   };
 
-  const handleStartInterview = (id: number) => {
-    openInterviewModalWithResume(id);
-  };
-
   return (
     <ResumeDetailPage
       resumeId={parseInt(resumeId, 10)}
       onBack={handleBack}
-      onStartInterview={handleStartInterview}
+      onStartInterview={canInterview ? openInterviewModalWithResume : undefined}
     />
   );
 }
@@ -237,7 +233,8 @@ function AppRoutes() {
   if (session === undefined) return <Loading />;
 
   if (session && !session.admin
-      && location.pathname !== ROUTES.login && location.pathname !== ROUTES.interviewSchedule) {
+      && ![ROUTES.login, ROUTES.interviewSchedule, ROUTES.resumeUpload, ROUTES.resumeHistory,
+        `${ROUTES.resumeHistory}/:resumeId`].some(path => matchPath(path, location.pathname))) {
     return <Navigate to={ROUTES.interviewSchedule} replace />;
   }
 
@@ -270,10 +267,10 @@ function AppRoutes() {
             <Route path="upload" element={<UploadPageWrapper />} />
 
             {/* 历史记录列表（简历库） */}
-            <Route path="history" element={<HistoryListWrapper />} />
+            <Route path="history" element={<HistoryListWrapper canInterview={session?.admin === true} />} />
 
             {/* 简历详情 */}
-            <Route path="history/:resumeId" element={<ResumeDetailWrapper />} />
+            <Route path="history/:resumeId" element={<ResumeDetailWrapper canInterview={session?.admin === true} />} />
 
             {/* 面试中心 */}
             <Route path="interview-hub" element={<InterviewHubPage />} />
