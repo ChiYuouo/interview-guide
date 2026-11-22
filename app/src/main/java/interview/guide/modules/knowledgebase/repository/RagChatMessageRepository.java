@@ -17,6 +17,8 @@ import java.util.Optional;
 @Repository
 public interface RagChatMessageRepository extends JpaRepository<RagChatMessageEntity, Long> {
 
+    Optional<RagChatMessageEntity> findByIdAndSession_UserId(Long id, Long userId);
+
     /**
      * 获取会话的所有消息（按顺序）
      */
@@ -48,10 +50,7 @@ public interface RagChatMessageRepository extends JpaRepository<RagChatMessageEn
     void deleteBySessionId(Long sessionId);
 
     /**
-     * 统计关联账号知识库的提问次数，避免多知识库重复计数。
+     * 按会话归属统计提问次数，避免多知识库重复计数。
      */
-    @Query("SELECT COUNT(DISTINCT m.id) FROM RagChatMessageEntity m "
-        + "JOIN m.session.knowledgeBases k WHERE k.userId = :userId AND m.type = :type")
-    long countByTypeAndKnowledgeBaseUserId(@Param("type") MessageType type,
-        @Param("userId") Long userId);
+    long countByTypeAndSession_UserId(MessageType type, Long userId);
 }

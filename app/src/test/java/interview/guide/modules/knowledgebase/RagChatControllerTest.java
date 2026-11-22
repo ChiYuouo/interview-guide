@@ -1,7 +1,9 @@
 package interview.guide.modules.knowledgebase;
 
+import interview.guide.modules.auth.model.AccountPrincipal;
 import interview.guide.modules.knowledgebase.model.RagChatDTO.SendMessageRequest;
 import interview.guide.modules.knowledgebase.service.RagChatSessionService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,18 +27,27 @@ class RagChatControllerTest {
   @Mock
   private RagChatSessionService sessionService;
 
+  @Mock
+  private AccountPrincipal account;
+
   @InjectMocks
   private RagChatController controller;
+
+  @BeforeEach
+  void setUp() {
+    when(account.getUserId()).thenReturn(7L);
+  }
 
   @Test
   @DisplayName("客户端中断时应保存已经生成的部分回答")
   void shouldPersistPartialAnswerWhenClientCancels() {
-    when(sessionService.prepareStreamMessage(1L, "什么是 RAG"))
+    when(sessionService.prepareStreamMessage(7L, 1L, "什么是 RAG"))
         .thenReturn(10L);
-    when(sessionService.getStreamAnswer(1L, "什么是 RAG"))
+    when(sessionService.getStreamAnswer(7L, 1L, "什么是 RAG"))
         .thenReturn(Flux.concat(Flux.just("部分回答"), Flux.never()));
 
     Flux<ServerSentEvent<String>> response = controller.sendMessageStream(
+        account,
         1L,
         new SendMessageRequest("什么是 RAG")
     );
@@ -46,18 +57,19 @@ class RagChatControllerTest {
     assertThat(event.get().data()).isEqualTo("部分回答");
     subscription.dispose();
 
-    verify(sessionService).completeStreamMessage(10L, "部分回答");
+    verify(sessionService).completeStreamMessage(7L, 10L, "部分回答");
   }
 
   @Test
   @DisplayName("首个分片前中断时也应结束消息占位")
   void shouldCompletePlaceholderWhenClientCancelsBeforeFirstChunk() {
-    when(sessionService.prepareStreamMessage(2L, "解释向量检索"))
+    when(sessionService.prepareStreamMessage(7L, 2L, "解释向量检索"))
         .thenReturn(20L);
-    when(sessionService.getStreamAnswer(2L, "解释向量检索"))
+    when(sessionService.getStreamAnswer(7L, 2L, "解释向量检索"))
         .thenReturn(Flux.never());
 
     Flux<ServerSentEvent<String>> response = controller.sendMessageStream(
+        account,
         2L,
         new SendMessageRequest("解释向量检索")
     );
@@ -65,6 +77,6 @@ class RagChatControllerTest {
     Disposable subscription = response.subscribe();
     subscription.dispose();
 
-    verify(sessionService).completeStreamMessage(20L, "【已中断】回答生成已取消");
+    verify(sessionService).completeStreamMessage(7L, 20L, "【已中断】回答生成已取消");
   }
 }

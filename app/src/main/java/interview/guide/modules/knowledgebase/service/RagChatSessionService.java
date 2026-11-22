@@ -49,17 +49,13 @@ public class RagChatSessionService {
      * 创建新会话
      */
     @Transactional
-    public SessionDTO createSession(CreateSessionRequest request) {
-        // 验证知识库存在
-        List<KnowledgeBaseEntity> knowledgeBases = knowledgeBaseRepository
-            .findAllById(request.knowledgeBaseIds());
-
-        if (knowledgeBases.size() != request.knowledgeBaseIds().size()) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "部分知识库不存在");
-        }
+    public SessionDTO createSession(Long userId, CreateSessionRequest request) {
+        List<KnowledgeBaseEntity> knowledgeBases =
+            requireOwnedKnowledgeBases(userId, request.knowledgeBaseIds());
 
         // 创建会话
         RagChatSessionEntity session = new RagChatSessionEntity();
+        session.setUserId(userId);
         session.setTitle(request.title() != null && !request.title().isBlank()
             ? request.title()
             : generateTitle(knowledgeBases));
@@ -75,8 +71,8 @@ public class RagChatSessionService {
     /**
      * 获取会话列表
      */
-    public List<SessionListItemDTO> listSessions() {
-        return sessionRepository.findAllOrderByPinnedAndUpdatedAtDesc()
+    public List<SessionListItemDTO> listSessions(Long userId) {
+        return sessionRepository.findByUserIdOrderByPinnedAndUpdatedAtDesc(userId)
             .stream()
             .map(ragChatMapper::toSessionListItemDTO)
             .toList();
@@ -86,10 +82,10 @@ public class RagChatSessionService {
      * 获取会话详情（包含消息）
      * 分两次查询避免笛卡尔积问题
      */
-    public SessionDetailDTO getSessionDetail(Long sessionId) {
+    public SessionDetailDTO getSessionDetail(Long userId, Long sessionId) {
         // 先加载会话和知识库
         RagChatSessionEntity session = sessionRepository
-            .findByIdWithKnowledgeBases(sessionId)
+            .findByIdAndUserIdWithKnowledgeBases(sessionId, userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
 
         // 再单独加载消息（避免笛卡尔积）
@@ -110,9 +106,8 @@ public class RagChatSessionService {
      * @return AI 消息的 ID
      */
     @Transactional
-    public Long prepareStreamMessage(Long sessionId, String question) {
-        RagChatSessionEntity session = sessionRepository.findByIdWithKnowledgeBases(sessionId)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
+    public Long prepareStreamMessage(Long userId, Long sessionId, String question) {
+        RagChatSessionEntity session = requireOwnedSession(userId, sessionId);
 
         // 获取当前消息数量作为起始顺序
         int nextOrder = session.getMessageCount();
@@ -148,8 +143,8 @@ public class RagChatSessionService {
      * 流式响应完成后更新消息
      */
     @Transactional
-    public void completeStreamMessage(Long messageId, String content) {
-        RagChatMessageEntity message = messageRepository.findById(messageId)
+    public void completeStreamMessage(Long userId, Long messageId, String content) {
+        RagChatMessageEntity message = messageRepository.findByIdAndSession_UserId(messageId, userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "消息不存在"));
 
         message.setContent(content);
@@ -162,8 +157,9 @@ public class RagChatSessionService {
     /**
      * 获取流式回答（带多轮上下文）
      */
-    public Flux<String> getStreamAnswer(Long sessionId, String question) {
-        RagChatSessionEntity session = sessionRepository.findByIdWithKnowledgeBases(sessionId)
+    public Flux<String> getStreamAnswer(Long userId, Long sessionId, String question) {
+        RagChatSessionEntity session = sessionRepository
+            .findByIdAndUserIdWithKnowledgeBases(sessionId, userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
 
         List<Long> kbIds = session.getKnowledgeBaseIds();
@@ -178,9 +174,8 @@ public class RagChatSessionService {
      * 更新会话标题
      */
     @Transactional
-    public void updateSessionTitle(Long sessionId, String title) {
-        RagChatSessionEntity session = sessionRepository.findById(sessionId)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
+    public void updateSessionTitle(Long userId, Long sessionId, String title) {
+        RagChatSessionEntity session = requireOwnedSession(userId, sessionId);
 
         session.setTitle(title);
         sessionRepository.save(session);
@@ -192,9 +187,8 @@ public class RagChatSessionService {
      * 切换会话置顶状态
      */
     @Transactional
-    public void togglePin(Long sessionId) {
-        RagChatSessionEntity session = sessionRepository.findById(sessionId)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
+    public void togglePin(Long userId, Long sessionId) {
+        RagChatSessionEntity session = requireOwnedSession(userId, sessionId);
 
         // 处理 null 值（兼容旧数据）
         Boolean currentPinned = session.getIsPinned() != null ? session.getIsPinned() : false;
@@ -208,12 +202,9 @@ public class RagChatSessionService {
      * 更新会话的知识库关联
      */
     @Transactional
-    public void updateSessionKnowledgeBases(Long sessionId, List<Long> knowledgeBaseIds) {
-        RagChatSessionEntity session = sessionRepository.findById(sessionId)
-            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
-
-        List<KnowledgeBaseEntity> knowledgeBases = knowledgeBaseRepository
-            .findAllById(knowledgeBaseIds);
+    public void updateSessionKnowledgeBases(Long userId, Long sessionId, List<Long> knowledgeBaseIds) {
+        RagChatSessionEntity session = requireOwnedSession(userId, sessionId);
+        List<KnowledgeBaseEntity> knowledgeBases = requireOwnedKnowledgeBases(userId, knowledgeBaseIds);
 
         session.setKnowledgeBases(new HashSet<>(knowledgeBases));
         sessionRepository.save(session);
@@ -225,16 +216,25 @@ public class RagChatSessionService {
      * 删除会话
      */
     @Transactional
-    public void deleteSession(Long sessionId) {
-        if (!sessionRepository.existsById(sessionId)) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "会话不存在");
-        }
-        sessionRepository.deleteById(sessionId);
+    public void deleteSession(Long userId, Long sessionId) {
+        sessionRepository.delete(requireOwnedSession(userId, sessionId));
 
         log.info("删除会话: sessionId={}", sessionId);
     }
 
-    // ========== 私有方法 ==========
+    private RagChatSessionEntity requireOwnedSession(Long userId, Long sessionId) {
+        return sessionRepository.findByIdAndUserId(sessionId, userId)
+            .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "会话不存在"));
+    }
+
+    private List<KnowledgeBaseEntity> requireOwnedKnowledgeBases(Long userId, List<Long> knowledgeBaseIds) {
+        List<KnowledgeBaseEntity> knowledgeBases = knowledgeBaseRepository
+            .findAllByUserIdAndIdIn(userId, knowledgeBaseIds);
+        if (knowledgeBases.size() != knowledgeBaseIds.size()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "部分知识库不存在");
+        }
+        return knowledgeBases;
+    }
 
     /**
      * 加载会话中最近的历史消息作为多轮上下文。

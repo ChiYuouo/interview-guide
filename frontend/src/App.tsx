@@ -238,6 +238,11 @@ function AppRoutes() {
         ROUTES.interview, `/${ROUTE_PATTERNS.interviewCreate}`, `/${ROUTE_PATTERNS.interviewSession}`,
         `/${ROUTE_PATTERNS.interviewLegacy}`, `/${ROUTE_PATTERNS.interviewDetail}`,
         ROUTES.voiceInterview, `/${ROUTE_PATTERNS.voiceInterviewEvaluation}`,
+        ROUTES.knowledgebase, ROUTES.knowledgebaseUpload, ROUTES.knowledgebaseChat,
+        ROUTES.knowledgebaseInterview, `/${ROUTE_PATTERNS.knowledgebaseInterviewSession}`,
+        `/${ROUTE_PATTERNS.knowledgebaseInterviewQuestions}`,
+        `/${ROUTE_PATTERNS.knowledgebaseInterviewHistory}`,
+        `/${ROUTE_PATTERNS.knowledgebaseInterviewDetail}`,
       ].some(path => matchPath(path, location.pathname))) {
     return <Navigate to={ROUTES.interviewSchedule} replace />;
   }
@@ -304,17 +309,17 @@ function AppRoutes() {
             <Route path={ROUTE_PATTERNS.voiceInterviewEvaluation} element={<VoiceInterviewEvaluationPage />} />
 
             {/* 知识库管理 */}
-            <Route path="knowledgebase" element={<KnowledgeBaseManagePageWrapper />} />
+            <Route path={ROUTES.knowledgebase.slice(1)} element={<KnowledgeBaseManagePageWrapper />} />
 
             {/* 知识库面试 */}
-            <Route path="knowledgebase-interview" element={<KnowledgeBaseInterviewPage />} />
-            <Route path="knowledgebase-interview/:knowledgeBaseId/questions" element={<KnowledgeBaseInterviewQuestionsPage />} />
-            <Route path="knowledgebase-interview/:knowledgeBaseId/interviews" element={<KnowledgeBaseInterviewHistoryWrapper />} />
-            <Route path="knowledgebase-interview/:knowledgeBaseId/interviews/:sessionId" element={<InterviewDetailPageWrapper />} />
-            <Route path="knowledgebase-interview/:sessionId" element={<KnowledgeBaseInterviewSessionPage />} />
+            <Route path={ROUTES.knowledgebaseInterview.slice(1)} element={<KnowledgeBaseInterviewPage />} />
+            <Route path={ROUTE_PATTERNS.knowledgebaseInterviewQuestions} element={<KnowledgeBaseInterviewQuestionsPage />} />
+            <Route path={ROUTE_PATTERNS.knowledgebaseInterviewHistory} element={<KnowledgeBaseInterviewHistoryWrapper />} />
+            <Route path={ROUTE_PATTERNS.knowledgebaseInterviewDetail} element={<InterviewDetailPageWrapper />} />
+            <Route path={ROUTE_PATTERNS.knowledgebaseInterviewSession} element={<KnowledgeBaseInterviewSessionPage />} />
 
             {/* 知识库上传 */}
-            <Route path="knowledgebase/upload" element={<KnowledgeBaseUploadPageWrapper />} />
+            <Route path={ROUTES.knowledgebaseUpload.slice(1)} element={<KnowledgeBaseUploadPageWrapper />} />
 
             {/* 面试日程管理 */}
             <Route path={ROUTES.interviewSchedule.slice(1)} element={<InterviewSchedulePage />} />
@@ -323,7 +328,7 @@ function AppRoutes() {
             <Route path="settings" element={<SettingsPage />} />
 
             {/* 问答助手（知识库聊天） */}
-            <Route path="knowledgebase/chat" element={<KnowledgeBaseQueryPageWrapper />} />
+            <Route path={ROUTES.knowledgebaseChat.slice(1)} element={<KnowledgeBaseQueryPageWrapper />} />
           </Route>
 
         </Routes>

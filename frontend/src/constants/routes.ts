@@ -9,7 +9,10 @@ export const ROUTES = {
   interviewSession: (sessionId: string) => `/interview/session/${sessionId}`,
   resumeUpload: '/upload',
   resumeHistory: '/history',
+  knowledgebase: '/knowledgebase',
   knowledgebaseUpload: '/knowledgebase/upload',
+  knowledgebaseChat: '/knowledgebase/chat',
+  knowledgebaseInterview: '/knowledgebase-interview',
 } as const;
 
 export const ROUTE_PATTERNS = {
@@ -18,4 +21,8 @@ export const ROUTE_PATTERNS = {
   interviewLegacy: 'interview/:resumeId',
   interviewDetail: 'interviews/:sessionId',
   voiceInterviewEvaluation: 'voice-interview/:sessionId/evaluation',
+  knowledgebaseInterviewQuestions: 'knowledgebase-interview/:knowledgeBaseId/questions',
+  knowledgebaseInterviewHistory: 'knowledgebase-interview/:knowledgeBaseId/interviews',
+  knowledgebaseInterviewDetail: 'knowledgebase-interview/:knowledgeBaseId/interviews/:sessionId',
+  knowledgebaseInterviewSession: 'knowledgebase-interview/:sessionId',
 } as const;

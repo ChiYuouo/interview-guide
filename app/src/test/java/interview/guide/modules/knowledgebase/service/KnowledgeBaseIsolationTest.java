@@ -4,6 +4,7 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.mapper.KnowledgeBaseMapperImpl;
+import interview.guide.infrastructure.mapper.RagChatMapperImpl;
 import interview.guide.modules.interview.service.InterviewSessionService;
 import interview.guide.modules.knowledgebase.listener.QuestionGenStreamProducer;
 import interview.guide.modules.knowledgebase.model.CreateKnowledgeBaseInterviewRequest;
@@ -14,6 +15,8 @@ import interview.guide.modules.knowledgebase.model.KnowledgeBaseListItemDTO;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseQuestionDTO;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseQuestionStatus;
 import interview.guide.modules.knowledgebase.model.QuestionGenStatus;
+import interview.guide.modules.knowledgebase.model.RagChatDTO.CreateSessionRequest;
+import interview.guide.modules.knowledgebase.model.RagChatDTO.SessionListItemDTO;
 import interview.guide.modules.knowledgebase.model.UpdateKnowledgeBaseQuestionRequest;
 import interview.guide.modules.knowledgebase.model.VectorStatus;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
@@ -63,6 +66,10 @@ class KnowledgeBaseIsolationTest {
   private QuestionGenStreamProducer questionProducer;
   @Autowired
   private InterviewSessionService interviewSessionService;
+  @Autowired
+  private RagChatSessionService ragChatSessionService;
+  @Autowired
+  private KnowledgeBaseQueryService queryService;
 
   @Test
   @DisplayName("知识库按账号去重，列表、搜索、下载和检索校验数据归属")
@@ -147,6 +154,51 @@ class KnowledgeBaseIsolationTest {
     verifyNoInteractions(questionProducer, interviewSessionService);
   }
 
+  @Test
+  @DisplayName("RAG 会话、消息和关联知识库按账号隔离")
+  void isolatesRagSessions() {
+    var ownKb = saveKnowledgeBase(7L, "我的文档", "我的分类");
+    var otherKb = saveKnowledgeBase(8L, "他的文档", "他的分类");
+    var own = ragChatSessionService.createSession(7L,
+        new CreateSessionRequest(List.of(ownKb.getId()), "我的会话"));
+    var other = ragChatSessionService.createSession(8L,
+        new CreateSessionRequest(List.of(otherKb.getId()), "他的会话"));
+    Long messageId = ragChatSessionService.prepareStreamMessage(8L, other.id(), "他的问题");
+
+    assertThat(ragChatSessionService.listSessions(7L))
+        .extracting(SessionListItemDTO::id).containsExactly(own.id());
+    assertThat(ragChatSessionService.listSessions(8L))
+        .extracting(SessionListItemDTO::id).containsExactly(other.id());
+    assertNotFound(() -> ragChatSessionService.getSessionDetail(7L, other.id()), ErrorCode.NOT_FOUND);
+    assertNotFound(() -> ragChatSessionService.updateSessionTitle(7L, other.id(), "跨账号改名"),
+        ErrorCode.NOT_FOUND);
+    assertNotFound(() -> ragChatSessionService.togglePin(7L, other.id()), ErrorCode.NOT_FOUND);
+    assertNotFound(() -> ragChatSessionService.deleteSession(7L, other.id()), ErrorCode.NOT_FOUND);
+    assertNotFound(() -> ragChatSessionService.prepareStreamMessage(7L, other.id(), "跨账号提问"),
+        ErrorCode.NOT_FOUND);
+    assertNotFound(() -> ragChatSessionService.getStreamAnswer(7L, other.id(), "跨账号检索"),
+        ErrorCode.NOT_FOUND);
+    assertNotFound(() -> ragChatSessionService.completeStreamMessage(7L, messageId, "跨账号改写"),
+        ErrorCode.NOT_FOUND);
+    assertNotFound(() -> ragChatSessionService.createSession(7L,
+        new CreateSessionRequest(List.of(ownKb.getId(), otherKb.getId()), null)), ErrorCode.NOT_FOUND);
+    assertNotFound(() -> ragChatSessionService.updateSessionKnowledgeBases(7L, own.id(),
+        List.of(otherKb.getId())), ErrorCode.NOT_FOUND);
+    assertNotFound(() -> ragChatSessionService.updateSessionKnowledgeBases(7L, other.id(),
+        List.of(ownKb.getId())), ErrorCode.NOT_FOUND);
+
+    ragChatSessionService.completeStreamMessage(8L, messageId, "他的回答");
+    var otherDetail = ragChatSessionService.getSessionDetail(8L, other.id());
+    assertThat(otherDetail.title()).isEqualTo("他的会话");
+    assertThat(otherDetail.messages()).extracting(message -> message.content())
+        .containsExactly("他的问题", "他的回答");
+    assertThat(ragChatSessionService.getSessionDetail(7L, own.id()).knowledgeBases())
+        .extracting(KnowledgeBaseListItemDTO::id).containsExactly(ownKb.getId());
+    assertThat(listService.getStatistics(7L).totalQuestionCount()).isZero();
+    assertThat(listService.getStatistics(8L).totalQuestionCount()).isEqualTo(1);
+    verifyNoInteractions(queryService);
+  }
+
   private void assertNotFound(ThrowingCallable call, ErrorCode code) {
     assertThatThrownBy(call).isInstanceOfSatisfying(
         BusinessException.class, error -> assertThat(error.getCode()).isEqualTo(code.getCode()));
@@ -168,7 +220,7 @@ class KnowledgeBaseIsolationTest {
   @EnableTransactionManagement
   @Import({KnowledgeBaseListService.class, KnowledgeBaseMapperImpl.class,
       KnowledgeBaseQuestionService.class, KnowledgeBaseInterviewService.class,
-      QuestionGenerationStateService.class})
+      QuestionGenerationStateService.class, RagChatSessionService.class, RagChatMapperImpl.class})
   static class Config {
     @Bean
     DataSource dataSource() {
@@ -211,6 +263,16 @@ class KnowledgeBaseIsolationTest {
     @Bean
     InterviewSessionService interviewSessionService() {
       return mock(InterviewSessionService.class);
+    }
+
+    @Bean
+    KnowledgeBaseQueryService queryService() {
+      return mock(KnowledgeBaseQueryService.class);
+    }
+
+    @Bean
+    KnowledgeBaseQueryProperties queryProperties() {
+      return new KnowledgeBaseQueryProperties();
     }
   }
 }

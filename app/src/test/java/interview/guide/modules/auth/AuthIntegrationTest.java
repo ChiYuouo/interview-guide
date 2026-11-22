@@ -37,6 +37,8 @@ import interview.guide.modules.interviewschedule.model.InterviewScheduleEntity;
 import interview.guide.modules.interviewschedule.repository.InterviewScheduleRepository;
 import interview.guide.modules.interviewschedule.service.InterviewParseService;
 import interview.guide.modules.interviewschedule.service.InterviewScheduleService;
+import interview.guide.modules.knowledgebase.RagChatController;
+import interview.guide.modules.knowledgebase.service.RagChatSessionService;
 import interview.guide.modules.resume.ResumeController;
 import interview.guide.modules.resume.listener.AnalyzeStreamProducer;
 import interview.guide.modules.resume.model.ResumeEntity;
@@ -109,6 +111,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -154,6 +157,9 @@ class AuthIntegrationTest {
 
   @Autowired
   private VoiceInterviewService voiceInterviewService;
+
+  @Autowired
+  private RagChatSessionService ragChatSessionService;
 
   private MockMvc mvc;
 
@@ -577,14 +583,18 @@ class AuthIntegrationTest {
   }
 
   @Test
-  @DisplayName("普通账号无法开户或访问尚未隔离的模块")
+  @DisplayName("普通账号可访问 RAG 会话，模型和账号管理仅限管理员")
   void restrictsNormalAccounts() throws Exception {
     createUser(csrf(login("admin")), "trial");
     var trial = csrf(login("trial"));
-    for (var path : new String[]{"/api/knowledgebase", "/api/llm-provider",
-        "/api/knowledgebase-interviews/sessions"}) {
-      mvc.perform(get(path).session(trial.session())).andExpect(status().isForbidden());
-    }
+    long trialId = accounts.findByUsername("trial").orElseThrow().getId();
+    mvc.perform(get("/api/rag-chat/sessions")).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/rag-chat/sessions").session(trial.session()))
+        .andExpect(jsonPath("$.code").value(200))
+        .andExpect(jsonPath("$.data.length()").value(0));
+    verify(ragChatSessionService).listSessions(trialId);
+    mvc.perform(get("/api/llm-provider/list").session(trial.session()))
+        .andExpect(status().isForbidden());
     mvc.perform(post(USERS_PATH).session(trial.session()).header(trial.headerName(), trial.token())
             .contentType("application/json").content(accountBody("unauthorized")))
         .andExpect(status().isForbidden());
@@ -656,7 +666,7 @@ class AuthIntegrationTest {
       TransactionalExecutor.class, FileHashService.class, ResumeMapperImpl.class, InterviewMapperImpl.class,
       InterviewController.class, InterviewPersistenceService.class, InterviewSessionService.class,
       InterviewHistoryService.class, InterviewSessionCache.class, VoiceInterviewController.class,
-      VoiceInterviewService.class, VoiceInterviewHandshakeInterceptor.class})
+      VoiceInterviewService.class, VoiceInterviewHandshakeInterceptor.class, RagChatController.class})
   static class WebConfig {
     @Bean
     SingleConnectionDataSource dataSource() {
@@ -969,6 +979,11 @@ class AuthIntegrationTest {
     @Bean
     VoiceEvaluateStreamProducer voiceEvaluateStreamProducer() {
       return mock(VoiceEvaluateStreamProducer.class);
+    }
+
+    @Bean
+    RagChatSessionService ragChatSessionService() {
+      return mock(RagChatSessionService.class);
     }
 
     @Bean

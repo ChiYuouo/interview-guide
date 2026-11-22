@@ -114,7 +114,7 @@ export default function Layout({username, admin, onLogout}: LayoutProps) {
   const interviewHistoryNav = { id: 'interviews', path: ROUTES.interviewHistory, label: '面试记录', icon: Users, description: '查看面试历史' };
 
   // 按业务模块组织的导航项
-  const navGroups: NavGroup[] = admin ? [
+  const navGroups: NavGroup[] = [
     {
       id: 'interview',
       title: '面试准备',
@@ -129,19 +129,21 @@ export default function Layout({username, admin, onLogout}: LayoutProps) {
       id: 'knowledge',
       title: '知识库',
       items: [
-        { id: 'kb-manage', path: '/knowledgebase', label: '知识库管理', icon: Database, description: '管理知识文档' },
-        { id: 'kb-interview', path: '/knowledgebase-interview', label: '知识库面试', icon: BookOpen, description: '题库维护与面试' },
-        { id: 'chat', path: '/knowledgebase/chat', label: '问答助手', icon: MessageSquare, description: '基于知识库问答' },
+        { id: 'kb-manage', path: ROUTES.knowledgebase, label: '知识库管理', icon: Database, description: '管理知识文档' },
+        { id: 'kb-interview', path: ROUTES.knowledgebaseInterview, label: '知识库面试', icon: BookOpen, description: '题库维护与面试' },
+        { id: 'chat', path: ROUTES.knowledgebaseChat, label: '问答助手', icon: MessageSquare, description: '基于知识库问答' },
       ],
     },
-    {
+  ];
+  if (admin) {
+    navGroups.push({
       id: 'system',
       title: '系统',
       items: [
         { id: 'settings', path: '/settings', label: '设置', icon: Settings, description: '管理模型和语音服务' },
       ],
-    },
-  ] : [{ id: 'interview', title: '面试准备', items: [resumeNav, interviewNav, interviewHistoryNav, scheduleNav] }];
+    });
+  }
 
   // 判断当前页面是否匹配导航项
   const isActive = (path: string) => {

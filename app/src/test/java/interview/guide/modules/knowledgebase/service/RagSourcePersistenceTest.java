@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import interview.guide.infrastructure.mapper.KnowledgeBaseMapper;
 import interview.guide.infrastructure.mapper.RagChatMapper;
 import interview.guide.modules.knowledgebase.RagChatController;
+import interview.guide.modules.auth.model.AccountPrincipal;
 import interview.guide.modules.knowledgebase.model.RagChatDTO.SendMessageRequest;
 import interview.guide.modules.knowledgebase.model.RagChatMessageEntity;
 import interview.guide.modules.knowledgebase.model.RagChatSessionEntity;
@@ -40,15 +41,17 @@ class RagSourcePersistenceTest {
     var message = new RagChatMessageEntity();
     message.setId(2L);
     message.setType(RagChatMessageEntity.MessageType.ASSISTANT);
-    when(messages.findById(2L)).thenReturn(Optional.of(message));
-    when(sessions.findByIdWithKnowledgeBases(1L)).thenReturn(Optional.of(session));
+    when(messages.findByIdAndSession_UserId(2L, 7L)).thenReturn(Optional.of(message));
+    when(sessions.findByIdAndUserIdWithKnowledgeBases(1L, 7L)).thenReturn(Optional.of(session));
     when(messages.findBySessionIdOrderByMessageOrderAsc(1L)).thenReturn(List.of(message));
     when(kbMapper.toListItemDTOList(List.of())).thenReturn(List.of());
     String footer = RagSources.footer(List.of(new Document("正文", Map.of("source_name", "手册", "kb_id", "9"))));
-    doReturn(2L).when(service).prepareStreamMessage(1L, "问题");
-    doReturn(Flux.just("回答", footer)).when(service).getStreamAnswer(1L, "问题");
+    doReturn(2L).when(service).prepareStreamMessage(7L, 1L, "问题");
+    doReturn(Flux.just("回答", footer)).when(service).getStreamAnswer(7L, 1L, "问题");
 
-    var events = new RagChatController(service).sendMessageStream(1L, new SendMessageRequest("问题"))
+    var account = mock(AccountPrincipal.class);
+    when(account.getUserId()).thenReturn(7L);
+    var events = new RagChatController(service).sendMessageStream(account, 1L, new SendMessageRequest("问题"))
         .collectList().block();
 
     verify(messages).save(message);
@@ -56,6 +59,6 @@ class RagSourcePersistenceTest {
     assertThat(message.getContent()).isEqualTo("回答" + footer);
     assertThat(events).hasSize(2);
     assertThat(events.getLast().data()).isEqualTo(footer.replace("\n", "\\n"));
-    assertThat(service.getSessionDetail(1L).messages().getFirst().content()).isEqualTo("回答" + footer);
+    assertThat(service.getSessionDetail(7L, 1L).messages().getFirst().content()).isEqualTo("回答" + footer);
   }
 }

@@ -93,6 +93,8 @@ public class SecurityConfig {
                 "/api/interview/skills", "/api/interview/skills/**").authenticated()
             .requestMatchers("/api/voice-interview/sessions", "/api/voice-interview/sessions/**",
                 "/ws/voice-interview/*").authenticated()
+            .requestMatchers("/api/knowledgebase/**", "/api/knowledgebase-interviews/sessions",
+                "/api/rag-chat/sessions", "/api/rag-chat/sessions/**").authenticated()
             .anyRequest().hasRole("ADMIN"))
         .exceptionHandling(errors -> errors
             .authenticationEntryPoint((request, response, error) ->
