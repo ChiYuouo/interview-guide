@@ -28,42 +28,45 @@ public class InterviewScheduleService {
     };
 
     @Transactional
-    public InterviewScheduleDTO create(CreateInterviewRequest request) {
+    public InterviewScheduleDTO create(Long userId, CreateInterviewRequest request) {
         InterviewScheduleEntity entity = new InterviewScheduleEntity();
         BeanUtils.copyProperties(request, entity);
+        entity.setUserId(userId);
         entity.setStatus(InterviewStatus.PENDING);
 
         return toDTO(repository.save(entity));
     }
 
     @Transactional
-    public InterviewScheduleDTO update(Long id, CreateInterviewRequest request) {
-        InterviewScheduleEntity entity = getByIdOrThrow(id);
-        BeanUtils.copyProperties(request, entity, "id", "status");
+    public InterviewScheduleDTO update(Long userId, Long id, CreateInterviewRequest request) {
+        InterviewScheduleEntity entity = getByIdOrThrow(userId, id);
+        BeanUtils.copyProperties(request, entity, "id", "userId", "status");
         return toDTO(repository.save(entity));
     }
 
     @Transactional
-    public void delete(Long id) {
-        repository.deleteById(id);
+    public void delete(Long userId, Long id) {
+        repository.delete(getByIdOrThrow(userId, id));
     }
 
     @Transactional
-    public InterviewScheduleDTO updateStatus(Long id, InterviewStatus status) {
-        InterviewScheduleEntity entity = getByIdOrThrow(id);
+    public InterviewScheduleDTO updateStatus(Long userId, Long id, InterviewStatus status) {
+        InterviewScheduleEntity entity = getByIdOrThrow(userId, id);
         entity.setStatus(status);
         return toDTO(repository.save(entity));
     }
 
-    public List<InterviewScheduleDTO> getAll(String status, LocalDateTime start, LocalDateTime end) {
+    @Transactional(readOnly = true)
+    public List<InterviewScheduleDTO> getAll(
+        Long userId, String status, LocalDateTime start, LocalDateTime end) {
         List<InterviewScheduleEntity> entities;
 
         if (start != null && end != null) {
-            entities = repository.findByInterviewTimeBetween(start, end);
+            entities = repository.findByUserIdAndInterviewTimeBetween(userId, start, end);
         } else if (status != null) {
-            entities = repository.findByStatus(InterviewStatus.valueOf(status));
+            entities = repository.findByUserIdAndStatus(userId, InterviewStatus.valueOf(status));
         } else {
-            entities = repository.findAll();
+            entities = repository.findByUserId(userId);
         }
 
         return entities.stream()
@@ -71,12 +74,13 @@ public class InterviewScheduleService {
             .collect(Collectors.toList());
     }
 
-    public InterviewScheduleDTO getById(Long id) {
-        return toDTO(getByIdOrThrow(id));
+    @Transactional(readOnly = true)
+    public InterviewScheduleDTO getById(Long userId, Long id) {
+        return toDTO(getByIdOrThrow(userId, id));
     }
 
-    private InterviewScheduleEntity getByIdOrThrow(Long id) {
-        return repository.findById(id)
+    private InterviewScheduleEntity getByIdOrThrow(Long userId, Long id) {
+        return repository.findByIdAndUserId(id, userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.INTERVIEW_SCHEDULE_NOT_FOUND, "面试日程不存在: " + id));
     }
 

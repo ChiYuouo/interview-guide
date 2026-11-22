@@ -1,5 +1,6 @@
 export interface UserSession {
   username: string;
+  admin: boolean;
 }
 
 export interface CsrfToken {

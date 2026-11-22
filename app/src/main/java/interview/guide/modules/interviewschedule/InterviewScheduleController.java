@@ -1,6 +1,7 @@
 package interview.guide.modules.interviewschedule;
 
 import interview.guide.common.result.Result;
+import interview.guide.modules.auth.model.AccountPrincipal;
 import interview.guide.modules.interviewschedule.model.CreateInterviewRequest;
 import interview.guide.modules.interviewschedule.model.InterviewScheduleDTO;
 import interview.guide.modules.interviewschedule.model.InterviewStatus;
@@ -12,6 +13,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -59,9 +61,12 @@ public class InterviewScheduleController {
      * @return 创建的面试记录
      */
     @PostMapping
-    public Result<InterviewScheduleDTO> create(@Valid @RequestBody CreateInterviewRequest request) {
+    public Result<InterviewScheduleDTO> create(
+        @AuthenticationPrincipal AccountPrincipal account,
+        @Valid @RequestBody CreateInterviewRequest request
+    ) {
         log.info("创建面试记录: {} - {}", request.getCompanyName(), request.getPosition());
-        InterviewScheduleDTO dto = scheduleService.create(request);
+        InterviewScheduleDTO dto = scheduleService.create(account.getUserId(), request);
         return Result.success(dto);
     }
 
@@ -72,8 +77,10 @@ public class InterviewScheduleController {
      * @return 面试记录详情
      */
     @GetMapping("/{id}")
-    public Result<InterviewScheduleDTO> getById(@PathVariable Long id) {
-        InterviewScheduleDTO dto = scheduleService.getById(id);
+    public Result<InterviewScheduleDTO> getById(
+        @AuthenticationPrincipal AccountPrincipal account, @PathVariable Long id
+    ) {
+        InterviewScheduleDTO dto = scheduleService.getById(account.getUserId(), id);
         return Result.success(dto);
     }
 
@@ -87,11 +94,12 @@ public class InterviewScheduleController {
      */
     @GetMapping
     public Result<List<InterviewScheduleDTO>> getAll(
+        @AuthenticationPrincipal AccountPrincipal account,
         @RequestParam(required = false) String status,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime start,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime end
     ) {
-        List<InterviewScheduleDTO> list = scheduleService.getAll(status, start, end);
+        List<InterviewScheduleDTO> list = scheduleService.getAll(account.getUserId(), status, start, end);
         return Result.success(list);
     }
 
@@ -104,11 +112,12 @@ public class InterviewScheduleController {
      */
     @PutMapping("/{id}")
     public Result<InterviewScheduleDTO> update(
+        @AuthenticationPrincipal AccountPrincipal account,
         @PathVariable Long id,
         @Valid @RequestBody CreateInterviewRequest request
     ) {
         log.info("更新面试记录: ID={}", id);
-        InterviewScheduleDTO dto = scheduleService.update(id, request);
+        InterviewScheduleDTO dto = scheduleService.update(account.getUserId(), id, request);
         return Result.success(dto);
     }
 
@@ -119,9 +128,11 @@ public class InterviewScheduleController {
      * @return 成功响应
      */
     @DeleteMapping("/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
+    public Result<Void> delete(
+        @AuthenticationPrincipal AccountPrincipal account, @PathVariable Long id
+    ) {
         log.info("删除面试记录: ID={}", id);
-        scheduleService.delete(id);
+        scheduleService.delete(account.getUserId(), id);
         return Result.success(null);
     }
 
@@ -134,11 +145,12 @@ public class InterviewScheduleController {
      */
     @RequestMapping(path = "/{id}/status", method = {RequestMethod.PATCH, RequestMethod.PUT})
     public Result<InterviewScheduleDTO> updateStatus(
+        @AuthenticationPrincipal AccountPrincipal account,
         @PathVariable Long id,
         @RequestParam InterviewStatus status
     ) {
         log.info("更新面试状态: ID={}, status={}", id, status);
-        InterviewScheduleDTO dto = scheduleService.updateStatus(id, status);
+        InterviewScheduleDTO dto = scheduleService.updateStatus(account.getUserId(), id, status);
         return Result.success(dto);
     }
 }

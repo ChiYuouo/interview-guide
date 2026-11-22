@@ -23,10 +23,19 @@ interface NavGroup {
 
 interface LayoutProps {
   username: string;
+  admin: boolean;
   onLogout: () => Promise<void>;
 }
 
-export default function Layout({username, onLogout}: LayoutProps) {
+const scheduleNav: NavItem = {
+  id: 'interview-schedule',
+  path: ROUTES.interviewSchedule,
+  label: '面试日程',
+  icon: Calendar,
+  description: '管理面试安排',
+};
+
+export default function Layout({username, admin, onLogout}: LayoutProps) {
   const location = useLocation();
   const currentPath = location.pathname;
   const {theme, toggleTheme} = useTheme();
@@ -101,7 +110,7 @@ export default function Layout({username, onLogout}: LayoutProps) {
   };
 
   // 按业务模块组织的导航项
-  const navGroups: NavGroup[] = [
+  const navGroups: NavGroup[] = admin ? [
     {
       id: 'interview',
       title: '面试准备',
@@ -109,7 +118,7 @@ export default function Layout({username, onLogout}: LayoutProps) {
         { id: 'resumes', path: '/history', label: '简历管理', icon: FileStack, description: '管理简历，AI 分析' },
         { id: 'interview-hub', path: '/interview-hub', label: '模拟面试', icon: Sparkles, description: '文字/语音面试练习' },
         { id: 'interviews', path: '/interviews', label: '面试记录', icon: Users, description: '查看面试历史' },
-        { id: 'interview-schedule', path: '/interview-schedule', label: '面试日程', icon: Calendar, description: '管理面试安排' },
+        scheduleNav,
       ],
     },
     {
@@ -128,7 +137,7 @@ export default function Layout({username, onLogout}: LayoutProps) {
         { id: 'settings', path: '/settings', label: '设置', icon: Settings, description: '管理模型和语音服务' },
       ],
     },
-  ];
+  ] : [{ id: 'interview', title: '面试准备', items: [scheduleNav] }];
 
   // 判断当前页面是否匹配导航项
   const isActive = (path: string) => {

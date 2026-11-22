@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 test('登录后返回原页面，刷新保持会话，退出后重新要求登录', async ({ page }) => {
   const password = randomUUID();
   let signedIn = false;
-  const session = { username: 'admin' };
+  const session = { username: 'admin', admin: true };
   const csrf = { headerName: 'X-CSRF-TOKEN', token: 'test-csrf-token' };
 
   await page.route('**/api/auth/session', route => signedIn
@@ -46,4 +46,18 @@ test('登录后返回原页面，刷新保持会话，退出后重新要求登�
   await page.getByRole('button', { name: '退出登录' }).click();
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByRole('heading', { name: '登录面试工作台' })).toBeVisible();
+});
+
+test('普通账号只显示日程入口，直接打开其他页面会返回日程', async ({ page }) => {
+  await page.route('**/api/auth/session', route => route.fulfill({
+    json: { code: 200, message: 'success', data: { username: 'trial', admin: false } },
+  }));
+  await page.route('**/api/interview-schedule**', route => route.fulfill({
+    json: { code: 200, message: 'success', data: [] },
+  }));
+
+  await page.goto('/knowledgebase');
+  await expect(page).toHaveURL(/\/interview-schedule$/);
+  await expect(page.getByRole('link', { name: /面试日程/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: /简历管理|知识库管理|设置/ })).toHaveCount(0);
 });

@@ -2,6 +2,7 @@ package interview.guide.common.config;
 
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.result.Result;
+import interview.guide.modules.auth.service.AccountService;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -19,9 +20,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.User;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.crypto.password.Pbkdf2PasswordEncoder;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
 import org.springframework.security.web.authentication.session.CompositeSessionAuthenticationStrategy;
@@ -40,23 +40,15 @@ import tools.jackson.databind.ObjectMapper;
 @EnableConfigurationProperties(AuthProperties.class)
 public class SecurityConfig {
   @Bean
-  AuthenticationManager authenticationManager(AuthProperties properties) {
-    var users = new InMemoryUserDetailsManager();
-    var encoder = Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_8();
-    if (properties.hasCredentials()) {
-      String username = properties.getUsername();
-      String password = properties.getPassword();
-      if (username == null || username.isBlank() || username.length() > 64
-          || !username.equals(username.strip()) || password.length() < 12
-          || password.length() > 256) {
-        throw new IllegalStateException("请配置有效的管理员账号（1–64 字符）和密码（12–256 字符）");
-      }
-      users.createUser(User.withUsername(username)
-          .password(encoder.encode(password))
-          .roles("ADMIN")
-          .build());
-    }
-    var provider = new DaoAuthenticationProvider(users);
+  PasswordEncoder passwordEncoder() {
+    return Pbkdf2PasswordEncoder.defaultsForSpringSecurity_v5_8();
+  }
+
+  @Bean
+  AuthenticationManager authenticationManager(
+      AccountService accounts, AuthProperties properties, PasswordEncoder encoder) {
+    accounts.configureAdmin(properties);
+    var provider = new DaoAuthenticationProvider(accounts);
     provider.setPasswordEncoder(encoder);
     return new ProviderManager(provider);
   }
@@ -94,7 +86,9 @@ public class SecurityConfig {
             .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
             .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/actuator/health").permitAll()
             .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
-            .anyRequest().authenticated())
+            .requestMatchers(HttpMethod.GET, "/api/auth/session").authenticated()
+            .requestMatchers("/api/interview-schedule", "/api/interview-schedule/**").authenticated()
+            .anyRequest().hasRole("ADMIN"))
         .exceptionHandling(errors -> errors
             .authenticationEntryPoint((request, response, error) ->
                 writeLoginRequired(response, mapper))
@@ -104,8 +98,9 @@ public class SecurityConfig {
                   && !(request.getContextPath() + "/api/auth/login").equals(request.getRequestURI())) {
                 writeLoginRequired(response, mapper);
               } else {
-                writeJson(response, mapper, 403, Result.error(ErrorCode.FORBIDDEN,
-                    "请求校验失败，请刷新页面后重试"));
+                String message = error instanceof CsrfException
+                    ? "请求校验失败，请刷新页面后重试" : "当前账号无权访问";
+                writeJson(response, mapper, 403, Result.error(ErrorCode.FORBIDDEN, message));
               }
             }))
         .logout(logout -> logout

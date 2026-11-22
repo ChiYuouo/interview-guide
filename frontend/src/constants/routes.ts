@@ -1,5 +1,6 @@
 export const ROUTES = {
   login: '/login',
+  interviewSchedule: '/interview-schedule',
   interview: '/interview',
   interviewCreate: (requestId: string) => `/interview/create/${requestId}`,
   interviewSession: (sessionId: string) => `/interview/session/${sessionId}`,

@@ -236,10 +236,15 @@ function AppRoutes() {
   }
   if (session === undefined) return <Loading />;
 
+  if (session && !session.admin
+      && location.pathname !== ROUTES.login && location.pathname !== ROUTES.interviewSchedule) {
+    return <Navigate to={ROUTES.interviewSchedule} replace />;
+  }
+
   const from = (location.state as { from?: string } | null)?.from;
-  const returnTo = typeof from === 'string' && /^\/(?![\\/])/.test(from)
-    ? from
-    : ROUTES.resumeHistory;
+  const returnTo = session?.admin
+    ? (typeof from === 'string' && /^\/(?![\\/])/.test(from) ? from : ROUTES.resumeHistory)
+    : ROUTES.interviewSchedule;
 
   async function logout() {
     await authApi.logout();
@@ -253,7 +258,7 @@ function AppRoutes() {
             : <LoginPage onLogin={setSession} />}
           />
           <Route path="/" element={session
-            ? <Layout username={session.username} onLogout={logout} />
+            ? <Layout username={session.username} admin={session.admin} onLogout={logout} />
             : <Navigate to={ROUTES.login} replace state={{
               from: `${location.pathname}${location.search}${location.hash}`,
             }} />}
@@ -311,7 +316,7 @@ function AppRoutes() {
             <Route path="knowledgebase/upload" element={<KnowledgeBaseUploadPageWrapper />} />
 
             {/* 面试日程管理 */}
-            <Route path="interview-schedule" element={<InterviewSchedulePage />} />
+            <Route path={ROUTES.interviewSchedule.slice(1)} element={<InterviewSchedulePage />} />
 
             {/* 设置 */}
             <Route path="settings" element={<SettingsPage />} />
