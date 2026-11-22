@@ -8,6 +8,7 @@ import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.repository.VectorRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -99,10 +100,11 @@ public class KnowledgeBasePersistenceService {
      * 保存新知识库元数据到数据库
      */
     @Transactional(rollbackFor = Exception.class)
-    public KnowledgeBaseEntity saveKnowledgeBase(MultipartFile file, String name, String category,
-                                                  String storageKey, String storageUrl, String fileHash) {
+    public KnowledgeBaseEntity saveKnowledgeBase(Long userId, MultipartFile file, String name,
+        String category, String storageKey, String storageUrl, String fileHash) {
         try {
             KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+            kb.setUserId(userId);
             kb.setFileHash(fileHash);
             kb.setName(name != null && !name.trim().isEmpty() ? name : extractNameFromFilename(file.getOriginalFilename()));
             kb.setCategory(category != null && !category.trim().isEmpty() ? category.trim() : null);
@@ -117,6 +119,8 @@ public class KnowledgeBasePersistenceService {
             KnowledgeBaseEntity saved = knowledgeBaseRepository.save(kb);
             log.info("知识库已保存: id={}, name={}, category={}, hash={}", saved.getId(), saved.getName(), saved.getCategory(), fileHash);
             return saved;
+        } catch (DataIntegrityViolationException e) {
+            throw e;
         } catch (Exception e) {
             log.error("保存知识库失败: {}", e.getMessage(), e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存知识库失败");

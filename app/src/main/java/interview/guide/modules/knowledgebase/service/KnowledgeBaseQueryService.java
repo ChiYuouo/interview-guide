@@ -212,17 +212,24 @@ public class KnowledgeBaseQueryService {
     /**
      * 查询知识库并返回完整响应
      */
-    public QueryResponse queryKnowledgeBase(QueryRequest request) {
+    public QueryResponse queryKnowledgeBase(Long userId, QueryRequest request) {
+        Map<Long, String> names = listService.requireOwnedKnowledgeBaseNames(
+            userId, request.knowledgeBaseIds());
         String answer = answerQuestion(request.knowledgeBaseIds(), request.question());
 
         // 获取知识库名称（多个知识库用逗号分隔）
-        List<String> kbNames = listService.getKnowledgeBaseNames(request.knowledgeBaseIds());
+        List<String> kbNames = request.knowledgeBaseIds().stream().map(names::get).toList();
         String kbNamesStr = String.join("、", kbNames);
 
         // 使用第一个知识库ID作为主要标识（兼容前端）
         Long primaryKbId = request.knowledgeBaseIds().getFirst();
 
         return new QueryResponse(answer, primaryKbId, kbNamesStr);
+    }
+
+    public Flux<String> queryKnowledgeBaseStream(Long userId, QueryRequest request) {
+        listService.requireOwnedKnowledgeBaseNames(userId, request.knowledgeBaseIds());
+        return answerQuestionStream(request.knowledgeBaseIds(), request.question());
     }
 
     /**

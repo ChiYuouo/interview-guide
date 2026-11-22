@@ -512,6 +512,7 @@ class RagEvaluationTest {
     Map<String, Integer> chunkCounts = new LinkedHashMap<>();
     fixtureContents.forEach((fixture, content) -> {
       KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+      kb.setUserId(1L);
       kb.setName("rag-eval-" + fixture);
       kb.setOriginalFilename(fixture);
       kb.setFileHash("rag-eval-" + RUN_ID + "-" + fixture);

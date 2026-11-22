@@ -33,8 +33,8 @@ public class KnowledgeBaseDeleteService {
      * 删除知识库
      * 包括：RAG会话关联、向量数据、RustFS文件、数据库记录
      */
-    public void deleteKnowledgeBase(Long id) {
-        String storageKey = transactionalExecutor.call(() -> deleteKnowledgeBaseRecords(id));
+    public void deleteKnowledgeBase(Long userId, Long id) {
+        String storageKey = transactionalExecutor.call(() -> deleteKnowledgeBaseRecords(userId, id));
 
         vectorService.deleteByKnowledgeBaseId(id);
 
@@ -50,9 +50,9 @@ public class KnowledgeBaseDeleteService {
         log.info("知识库已删除: id={}", id);
     }
 
-    private String deleteKnowledgeBaseRecords(Long id) {
+    private String deleteKnowledgeBaseRecords(Long userId, Long id) {
         // 1. 获取知识库信息
-        KnowledgeBaseEntity kb = knowledgeBaseRepository.findById(id)
+        KnowledgeBaseEntity kb = knowledgeBaseRepository.findByIdAndUserId(id, userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在"));
         String storageKey = kb.getStorageKey();
         

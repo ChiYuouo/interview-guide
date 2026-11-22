@@ -1,6 +1,16 @@
 package interview.guide.modules.knowledgebase.model;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.LocalDateTime;
 
@@ -8,18 +18,24 @@ import java.time.LocalDateTime;
  * 知识库实体
  */
 @Entity
-@Table(name = "knowledge_bases", indexes = {
-    @Index(name = "idx_kb_hash", columnList = "fileHash", unique = true),
-    @Index(name = "idx_kb_category", columnList = "category")
-})
+@Table(name = "knowledge_bases",
+    indexes = {
+        @Index(name = "idx_kb_category", columnList = "category"),
+        @Index(name = "idx_knowledge_bases_user_uploaded", columnList = "user_id, uploaded_at")
+    },
+    uniqueConstraints = @UniqueConstraint(
+        name = "uk_knowledge_bases_user_file_hash", columnNames = {"user_id", "file_hash"}))
 public class KnowledgeBaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "user_id", nullable = false, updatable = false)
+    private Long userId;
+
     // 文件内容的SHA-256哈希值，用于去重
-    @Column(nullable = false, unique = true, length = 64)
+    @Column(name = "file_hash", nullable = false, length = 64)
     private String fileHash;
 
     // 知识库名称（用户自定义或从文件名提取）
@@ -146,6 +162,14 @@ public class KnowledgeBaseEntity {
         this.id = id;
     }
     
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
+
     public String getFileHash() {
         return fileHash;
     }

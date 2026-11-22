@@ -8,6 +8,9 @@ import interview.guide.infrastructure.file.FileHashService;
 import interview.guide.infrastructure.file.FileStorageService;
 import interview.guide.infrastructure.file.FileValidationService;
 import interview.guide.infrastructure.file.KnowledgeBaseUploadLimiter;
+import interview.guide.modules.auth.model.AccountPrincipal;
+import interview.guide.modules.auth.model.AccountRole;
+import interview.guide.modules.auth.model.UserAccountEntity;
 import interview.guide.modules.knowledgebase.KnowledgeBaseController;
 import interview.guide.modules.knowledgebase.listener.VectorizeStreamProducer;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
@@ -31,6 +34,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -103,16 +109,16 @@ class KnowledgeBaseUploadConcurrencyTest {
 
     try {
       for (int index = 0; index < 4; index++) {
-        uploads.add(executor.submit(() -> service.uploadKnowledgeBase(file, null, null)));
+        uploads.add(executor.submit(() -> service.uploadKnowledgeBase(7L, file, null, null)));
       }
       assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
 
-      assertThatThrownBy(() -> service.uploadKnowledgeBase(file, null, null))
+      assertThatThrownBy(() -> service.uploadKnowledgeBase(7L, file, null, null))
           .isInstanceOfSatisfying(BusinessException.class, exception -> {
             assertThat(exception.getCode()).isEqualTo(ErrorCode.RATE_LIMIT_EXCEEDED.getCode());
             assertThat(exception.getMessage()).contains("上传繁忙", "重试");
           });
-      assertThatThrownBy(() -> service.uploadKnowledgeBase(file, null, null))
+      assertThatThrownBy(() -> service.uploadKnowledgeBase(7L, file, null, null))
           .isInstanceOf(BusinessException.class);
 
       assertThat(validationCalls).hasValue(4);
@@ -120,7 +126,7 @@ class KnowledgeBaseUploadConcurrencyTest {
       for (Future<Map<String, Object>> upload : uploads) {
         assertThat(upload.get(5, TimeUnit.SECONDS)).containsEntry("duplicate", true);
       }
-      assertThat(service.uploadKnowledgeBase(file, null, null)).containsEntry("duplicate", true);
+      assertThat(service.uploadKnowledgeBase(7L, file, null, null)).containsEntry("duplicate", true);
       verify(storageService, never()).uploadKnowledgeBase(any());
       verify(producer, never()).sendVectorizeTask(anyLong());
     } finally {
@@ -139,9 +145,9 @@ class KnowledgeBaseUploadConcurrencyTest {
         .validateFile(any(), anyLong(), eq("知识库"));
     stubDuplicateUpload();
 
-    assertThatThrownBy(() -> service.uploadKnowledgeBase(file, null, null)).isSameAs(failure);
+    assertThatThrownBy(() -> service.uploadKnowledgeBase(7L, file, null, null)).isSameAs(failure);
 
-    assertThat(service.uploadKnowledgeBase(file, null, null)).containsEntry("duplicate", true);
+    assertThat(service.uploadKnowledgeBase(7L, file, null, null)).containsEntry("duplicate", true);
   }
 
   @Test
@@ -153,9 +159,9 @@ class KnowledgeBaseUploadConcurrencyTest {
     when(persistenceService.handleDuplicateKnowledgeBase(existing, "existing-hash"))
         .thenThrow(failure).thenReturn(Map.of("duplicate", true));
 
-    assertThatThrownBy(() -> service.uploadKnowledgeBase(file, null, null)).isSameAs(failure);
+    assertThatThrownBy(() -> service.uploadKnowledgeBase(7L, file, null, null)).isSameAs(failure);
 
-    assertThat(service.uploadKnowledgeBase(file, null, null)).containsEntry("duplicate", true);
+    assertThat(service.uploadKnowledgeBase(7L, file, null, null)).containsEntry("duplicate", true);
   }
 
   @ParameterizedTest
@@ -164,7 +170,7 @@ class KnowledgeBaseUploadConcurrencyTest {
   void shouldReleasePermitAfterStorageOrDatabaseFailure(boolean storageFails) {
     service = createService(1);
     KnowledgeBaseEntity existing = stubDuplicateUpload();
-    when(repository.findByFileHash("existing-hash"))
+    when(repository.findByUserIdAndFileHash(7L, "existing-hash"))
         .thenReturn(Optional.empty()).thenReturn(Optional.of(existing));
     BusinessException failure = new BusinessException(
         storageFails ? ErrorCode.STORAGE_UPLOAD_FAILED : ErrorCode.INTERNAL_ERROR, "上传依赖失败");
@@ -173,13 +179,13 @@ class KnowledgeBaseUploadConcurrencyTest {
     } else {
       when(storageService.uploadKnowledgeBase(file)).thenReturn("kb/orphan");
       when(storageService.getFileUrl("kb/orphan")).thenReturn("http://storage/kb/orphan");
-      when(persistenceService.saveKnowledgeBase(any(), any(), any(), anyString(), anyString(),
+      when(persistenceService.saveKnowledgeBase(eq(7L), any(), any(), any(), anyString(), anyString(),
           anyString())).thenThrow(failure);
     }
 
-    assertThatThrownBy(() -> service.uploadKnowledgeBase(file, null, null)).isSameAs(failure);
+    assertThatThrownBy(() -> service.uploadKnowledgeBase(7L, file, null, null)).isSameAs(failure);
 
-    assertThat(service.uploadKnowledgeBase(file, null, null)).containsEntry("duplicate", true);
+    assertThat(service.uploadKnowledgeBase(7L, file, null, null)).containsEntry("duplicate", true);
     if (!storageFails) {
       verify(storageService).deleteKnowledgeBase("kb/orphan");
     }
@@ -206,7 +212,7 @@ class KnowledgeBaseUploadConcurrencyTest {
     try {
       Future<?> upload = executor.submit(() -> {
         try {
-          service.uploadKnowledgeBase(file, null, null);
+          service.uploadKnowledgeBase(7L, file, null, null);
         } finally {
           exited.countDown();
         }
@@ -216,7 +222,7 @@ class KnowledgeBaseUploadConcurrencyTest {
       assertThat(upload.cancel(true)).isTrue();
       assertThat(exited.await(5, TimeUnit.SECONDS)).isTrue();
 
-      assertThat(service.uploadKnowledgeBase(file, null, null)).containsEntry("duplicate", true);
+      assertThat(service.uploadKnowledgeBase(7L, file, null, null)).containsEntry("duplicate", true);
     } finally {
       executor.shutdownNow();
       assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
@@ -241,17 +247,31 @@ class KnowledgeBaseUploadConcurrencyTest {
     MockMvc api = MockMvcBuilders.standaloneSetup(new KnowledgeBaseController(service,
             mock(KnowledgeBaseQueryService.class), mock(KnowledgeBaseListService.class),
             mock(KnowledgeBaseDeleteService.class)))
+        .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
         .setControllerAdvice(new GlobalExceptionHandler()).build();
     ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<>(1));
     try {
-      Future<?> upload = executor.submit(() -> service.uploadKnowledgeBase(file, null, null));
+      Future<?> upload = executor.submit(() -> service.uploadKnowledgeBase(7L, file, null, null));
       assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
 
-      api.perform(multipart("/api/knowledgebase/upload").file((MockMultipartFile) file))
-          .andExpect(status().isOk())
-          .andExpect(jsonPath("$.code").value(8001))
-          .andExpect(jsonPath("$.message").value("知识库上传繁忙，请稍后重试"));
+      var account = new UserAccountEntity();
+      account.setId(7L);
+      account.setUsername("upload-test");
+      account.setPasswordHash("test");
+      account.setRole(AccountRole.ADMIN);
+      var principal = new AccountPrincipal(account);
+      var authentication = UsernamePasswordAuthenticationToken.authenticated(
+          principal, null, principal.getAuthorities());
+      SecurityContextHolder.getContext().setAuthentication(authentication);
+      try {
+        api.perform(multipart("/api/knowledgebase/upload").file((MockMultipartFile) file))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.code").value(8001))
+            .andExpect(jsonPath("$.message").value("知识库上传繁忙，请稍后重试"));
+      } finally {
+        SecurityContextHolder.clearContext();
+      }
 
       assertThat(validationCalls).hasValue(1);
       release.countDown();
@@ -276,7 +296,7 @@ class KnowledgeBaseUploadConcurrencyTest {
     existing.setId(42L);
     when(parseService.detectContentType(file)).thenReturn("application/pdf");
     when(hashService.calculateHash(file)).thenReturn("existing-hash");
-    when(repository.findByFileHash("existing-hash")).thenReturn(Optional.of(existing));
+    when(repository.findByUserIdAndFileHash(7L, "existing-hash")).thenReturn(Optional.of(existing));
     when(persistenceService.handleDuplicateKnowledgeBase(existing, "existing-hash"))
         .thenReturn(Map.of("duplicate", true));
     return existing;

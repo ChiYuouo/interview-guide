@@ -1,7 +1,10 @@
 package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.ai.LlmProviderRegistry;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.knowledgebase.metrics.RagMetrics;
+import interview.guide.modules.knowledgebase.model.QueryRequest;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -39,6 +42,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -88,6 +92,21 @@ class KnowledgeBaseQueryServiceTest {
   private void stubDocuments() {
     when(vectorService.similaritySearch(anyString(), anyList(), anyInt(), anyDouble()))
         .thenReturn(List.of(new Document("相关片段内容")));
+  }
+
+  @Test
+  @DisplayName("同步和流式问答在检索前拒绝其他账号的知识库")
+  void rejectsUnownedKnowledgeBasesBeforeRetrieval() throws Exception {
+    service = buildService(false);
+    var request = new QueryRequest(List.of(1L, 2L), "测试问题");
+    when(listService.requireOwnedKnowledgeBaseNames(7L, request.knowledgeBaseIds()))
+        .thenThrow(new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND));
+
+    assertThatThrownBy(() -> service.queryKnowledgeBase(7L, request))
+        .isInstanceOf(BusinessException.class);
+    assertThatThrownBy(() -> service.queryKnowledgeBaseStream(7L, request))
+        .isInstanceOf(BusinessException.class);
+    verifyNoInteractions(vectorService, countService, llmProviderRegistry);
   }
 
   @Nested

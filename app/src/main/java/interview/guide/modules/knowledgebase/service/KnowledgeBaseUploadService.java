@@ -12,6 +12,7 @@ import interview.guide.modules.knowledgebase.model.VectorStatus;
 import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -47,12 +48,13 @@ public class KnowledgeBaseUploadService {
      * @param category 分类（可选）
      * @return 上传结果和存储信息（包含duplicate字段，表示是否为重复上传）
      */
-    public Map<String, Object> uploadKnowledgeBase(MultipartFile file, String name, String category) {
-        return uploadLimiter.execute(() -> doUploadKnowledgeBase(file, name, category));
+    public Map<String, Object> uploadKnowledgeBase(
+        Long userId, MultipartFile file, String name, String category) {
+        return uploadLimiter.execute(() -> doUploadKnowledgeBase(userId, file, name, category));
     }
 
     private Map<String, Object> doUploadKnowledgeBase(
-        MultipartFile file, String name, String category) {
+        Long userId, MultipartFile file, String name, String category) {
         // 1. 验证文件
         fileValidationService.validateFile(file, MAX_FILE_SIZE, "知识库");
 
@@ -65,7 +67,8 @@ public class KnowledgeBaseUploadService {
 
         // 3. 检查知识库是否已存在（去重）
         String fileHash = fileHashService.calculateHash(file);
-        Optional<KnowledgeBaseEntity> existingKb = knowledgeBaseRepository.findByFileHash(fileHash);
+        Optional<KnowledgeBaseEntity> existingKb = knowledgeBaseRepository
+            .findByUserIdAndFileHash(userId, fileHash);
         if (existingKb.isPresent()) {
             log.info("检测到重复知识库: hash={}", fileHash);
             return persistenceService.handleDuplicateKnowledgeBase(existingKb.get(), fileHash);
@@ -79,9 +82,17 @@ public class KnowledgeBaseUploadService {
         // 5. 保存知识库元数据到数据库（状态为 PENDING）；失败时补偿删除孤儿对象（按 fileKey，不删实体——此时还没有实体）
         KnowledgeBaseEntity savedKb;
         try {
-            savedKb = persistenceService.saveKnowledgeBase(file, name, category, fileKey, fileUrl, fileHash);
+            savedKb = persistenceService.saveKnowledgeBase(
+                userId, file, name, category, fileKey, fileUrl, fileHash);
         } catch (Exception dbError) {
             compensateOrphanObject(fileKey, dbError);
+            if (dbError instanceof DataIntegrityViolationException) {
+                var duplicate = knowledgeBaseRepository.findByUserIdAndFileHash(userId, fileHash);
+                if (duplicate.isPresent()) {
+                    return persistenceService.handleDuplicateKnowledgeBase(duplicate.get(), fileHash);
+                }
+                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存知识库失败", dbError);
+            }
             throw dbError;
         }
 
@@ -143,8 +154,8 @@ public class KnowledgeBaseUploadService {
      *
      * @param kbId 知识库ID
      */
-    public void revectorize(Long kbId) {
-        KnowledgeBaseEntity kb = knowledgeBaseRepository.findById(kbId)
+    public void revectorize(Long userId, Long kbId) {
+        KnowledgeBaseEntity kb = knowledgeBaseRepository.findByIdAndUserId(kbId, userId)
             .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "知识库不存在"));
 
         if (kb.getStorageKey() == null || kb.getStorageKey().trim().isEmpty()

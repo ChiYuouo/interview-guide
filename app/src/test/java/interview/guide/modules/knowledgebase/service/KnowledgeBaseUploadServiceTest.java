@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -25,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -64,18 +66,18 @@ class KnowledgeBaseUploadServiceTest {
     MultipartFile file = new MockMultipartFile("file", "a.pdf", "application/pdf", new byte[] {1, 2, 3});
     when(parseService.detectContentType(file)).thenReturn("application/pdf");
     when(fileHashService.calculateHash(file)).thenReturn("hash-1");
-    when(knowledgeBaseRepository.findByFileHash("hash-1")).thenReturn(Optional.empty());
+    when(knowledgeBaseRepository.findByUserIdAndFileHash(7L, "hash-1")).thenReturn(Optional.empty());
     when(storageService.uploadKnowledgeBase(file)).thenReturn("kb/1");
     when(storageService.getFileUrl("kb/1")).thenReturn("http://rustfs/kb/1");
     KnowledgeBaseEntity saved = new KnowledgeBaseEntity();
     saved.setId(11L);
     saved.setName("a.pdf");
     saved.setFileSize(3L);
-    when(persistenceService.saveKnowledgeBase(any(), anyString(), any(), anyString(), anyString(), anyString()))
+    when(persistenceService.saveKnowledgeBase(eq(7L), any(), anyString(), any(), anyString(), anyString(), anyString()))
         .thenReturn(saved);
 
     when(vectorizeStreamProducer.sendVectorizeTask(11L)).thenReturn(true);
-    Map<String, Object> result = service.uploadKnowledgeBase(file, "测试知识库", "JVM");
+    Map<String, Object> result = service.uploadKnowledgeBase(7L, file, "测试知识库", "JVM");
 
     verify(parseService, never()).parseContent(any(MultipartFile.class));
     verify(parseService, never()).parseContent(any(), anyString());
@@ -96,18 +98,18 @@ class KnowledgeBaseUploadServiceTest {
     MultipartFile file = new MockMultipartFile("file", "a.pdf", "application/pdf", new byte[] {1, 2, 3});
     when(parseService.detectContentType(file)).thenReturn("application/pdf");
     when(fileHashService.calculateHash(file)).thenReturn("hash-2");
-    when(knowledgeBaseRepository.findByFileHash("hash-2")).thenReturn(Optional.empty());
+    when(knowledgeBaseRepository.findByUserIdAndFileHash(7L, "hash-2")).thenReturn(Optional.empty());
     when(storageService.uploadKnowledgeBase(file)).thenReturn("kb/12");
     when(storageService.getFileUrl("kb/12")).thenReturn("http://rustfs/kb/12");
     KnowledgeBaseEntity saved = new KnowledgeBaseEntity();
     saved.setId(12L);
     saved.setName("a.pdf");
     saved.setFileSize(3L);
-    when(persistenceService.saveKnowledgeBase(any(), anyString(), any(), anyString(), anyString(), anyString()))
+    when(persistenceService.saveKnowledgeBase(eq(7L), any(), anyString(), any(), anyString(), anyString(), anyString()))
         .thenReturn(saved);
     when(vectorizeStreamProducer.sendVectorizeTask(12L)).thenReturn(false);
 
-    Map<String, Object> result = service.uploadKnowledgeBase(file, "测试知识库", "JVM");
+    Map<String, Object> result = service.uploadKnowledgeBase(7L, file, "测试知识库", "JVM");
 
     @SuppressWarnings("unchecked")
     Map<String, Object> knowledgeBase = (Map<String, Object>) result.get("knowledgeBase");
@@ -124,13 +126,13 @@ class KnowledgeBaseUploadServiceTest {
     MultipartFile file = new MockMultipartFile("file", "a.pdf", "application/pdf", new byte[] {1, 2, 3});
     when(parseService.detectContentType(file)).thenReturn("application/pdf");
     when(fileHashService.calculateHash(file)).thenReturn("hash-3");
-    when(knowledgeBaseRepository.findByFileHash("hash-3")).thenReturn(Optional.empty());
+    when(knowledgeBaseRepository.findByUserIdAndFileHash(7L, "hash-3")).thenReturn(Optional.empty());
     when(storageService.uploadKnowledgeBase(file)).thenReturn("kb/orphan");
     when(storageService.getFileUrl("kb/orphan")).thenReturn("http://rustfs/kb/orphan");
-    when(persistenceService.saveKnowledgeBase(any(), anyString(), any(), anyString(), anyString(), anyString()))
+    when(persistenceService.saveKnowledgeBase(eq(7L), any(), anyString(), any(), anyString(), anyString(), anyString()))
         .thenThrow(new RuntimeException("db down"));
 
-    assertThatThrownBy(() -> service.uploadKnowledgeBase(file, "测试知识库", "JVM"))
+    assertThatThrownBy(() -> service.uploadKnowledgeBase(7L, file, "测试知识库", "JVM"))
         .isInstanceOf(RuntimeException.class)
         .hasMessageContaining("db down");
 
@@ -145,16 +147,40 @@ class KnowledgeBaseUploadServiceTest {
     MultipartFile file = new MockMultipartFile("file", "a.pdf", "application/pdf", new byte[] {1, 2, 3});
     when(parseService.detectContentType(file)).thenReturn("application/pdf");
     when(fileHashService.calculateHash(file)).thenReturn("hash-4");
-    when(knowledgeBaseRepository.findByFileHash("hash-4")).thenReturn(Optional.empty());
+    when(knowledgeBaseRepository.findByUserIdAndFileHash(7L, "hash-4")).thenReturn(Optional.empty());
     when(storageService.uploadKnowledgeBase(file)).thenReturn("kb/orphan2");
     when(storageService.getFileUrl("kb/orphan2")).thenReturn("http://rustfs/kb/orphan2");
-    when(persistenceService.saveKnowledgeBase(any(), anyString(), any(), anyString(), anyString(), anyString()))
+    when(persistenceService.saveKnowledgeBase(eq(7L), any(), anyString(), any(), anyString(), anyString(), anyString()))
         .thenThrow(new RuntimeException("db down"));
     doThrow(new RuntimeException("s3 delete down")).when(storageService).deleteKnowledgeBase("kb/orphan2");
 
-    assertThatThrownBy(() -> service.uploadKnowledgeBase(file, "测试知识库", "JVM"))
+    assertThatThrownBy(() -> service.uploadKnowledgeBase(7L, file, "测试知识库", "JVM"))
         .isInstanceOf(RuntimeException.class)
         .hasMessageContaining("db down");
+  }
+
+  @Test
+  @DisplayName("同账号并发上传相同文件时复用先保存的知识库并清理多余对象")
+  void shouldReuseExistingKnowledgeBaseOnConcurrentUpload() {
+    var file = new MockMultipartFile("file", "a.pdf", "application/pdf", new byte[] {1, 2, 3});
+    when(parseService.detectContentType(file)).thenReturn("application/pdf");
+    when(fileHashService.calculateHash(file)).thenReturn("same-hash");
+    var existing = new KnowledgeBaseEntity();
+    existing.setId(21L);
+    when(knowledgeBaseRepository.findByUserIdAndFileHash(7L, "same-hash"))
+        .thenReturn(Optional.empty(), Optional.of(existing));
+    when(storageService.uploadKnowledgeBase(file)).thenReturn("kb/extra");
+    when(storageService.getFileUrl("kb/extra")).thenReturn("http://rustfs/kb/extra");
+    when(persistenceService.saveKnowledgeBase(7L, file, "知识库", null,
+        "kb/extra", "http://rustfs/kb/extra", "same-hash"))
+        .thenThrow(new DataIntegrityViolationException("duplicate"));
+    var duplicate = Map.<String, Object>of("duplicate", true);
+    when(persistenceService.handleDuplicateKnowledgeBase(existing, "same-hash"))
+        .thenReturn(duplicate);
+
+    assertThat(service.uploadKnowledgeBase(7L, file, "知识库", null)).isEqualTo(duplicate);
+    verify(storageService).deleteKnowledgeBase("kb/extra");
+    verify(vectorizeStreamProducer, never()).sendVectorizeTask(anyLong());
   }
 
   @Test
@@ -168,7 +194,7 @@ class KnowledgeBaseUploadServiceTest {
     existing.setName("a.pdf");
     existing.setFileSize(3L);
     existing.setVectorStatus(interview.guide.modules.knowledgebase.model.VectorStatus.COMPLETED);
-    when(knowledgeBaseRepository.findByFileHash("hash-dup")).thenReturn(Optional.of(existing));
+    when(knowledgeBaseRepository.findByUserIdAndFileHash(7L, "hash-dup")).thenReturn(Optional.of(existing));
     when(persistenceService.handleDuplicateKnowledgeBase(existing, "hash-dup")).thenReturn(Map.of(
         "knowledgeBase", Map.of(
             "id", existing.getId(),
@@ -179,7 +205,7 @@ class KnowledgeBaseUploadServiceTest {
         "storage", Map.of("fileKey", "kb/21", "fileUrl", "http://rustfs/kb/21"),
         "duplicate", true));
 
-    Map<String, Object> result = service.uploadKnowledgeBase(file, "测试知识库", "JVM");
+    Map<String, Object> result = service.uploadKnowledgeBase(7L, file, "测试知识库", "JVM");
 
     @SuppressWarnings("unchecked")
     Map<String, Object> knowledgeBase = (Map<String, Object>) result.get("knowledgeBase");
@@ -196,10 +222,10 @@ class KnowledgeBaseUploadServiceTest {
     kb.setId(11L);
     kb.setStorageKey("kb/11");
     kb.setOriginalFilename("a.pdf");
-    when(knowledgeBaseRepository.findById(11L)).thenReturn(Optional.of(kb));
+    when(knowledgeBaseRepository.findByIdAndUserId(11L, 7L)).thenReturn(Optional.of(kb));
     when(vectorizeStreamProducer.sendVectorizeTask(11L)).thenReturn(true);
 
-    service.revectorize(11L);
+    service.revectorize(7L, 11L);
 
     verify(parseService, never()).downloadAndParseContent(anyString(), anyString());
     verify(persistenceService).updateVectorStatusToPending(11L);
@@ -214,10 +240,10 @@ class KnowledgeBaseUploadServiceTest {
     kb.setId(13L);
     kb.setStorageKey("kb/13");
     kb.setOriginalFilename("a.pdf");
-    when(knowledgeBaseRepository.findById(13L)).thenReturn(Optional.of(kb));
+    when(knowledgeBaseRepository.findByIdAndUserId(13L, 7L)).thenReturn(Optional.of(kb));
     when(vectorizeStreamProducer.sendVectorizeTask(13L)).thenReturn(false);
 
-    assertThatThrownBy(() -> service.revectorize(13L))
+    assertThatThrownBy(() -> service.revectorize(7L, 13L))
         .isInstanceOf(interview.guide.common.exception.BusinessException.class)
         .hasMessageContaining("任务投递失败");
   }
