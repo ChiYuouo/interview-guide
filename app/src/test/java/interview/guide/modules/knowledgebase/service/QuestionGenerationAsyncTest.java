@@ -100,7 +100,8 @@ class QuestionGenerationAsyncTest {
         questionRepository,
         objectMapper,
         questionGenStreamProducer,
-        stateService
+        stateService,
+        mock(LlmProviderRegistry.class)
     );
 
     generationService = new KnowledgeBaseQuestionGenerationService(
@@ -124,7 +125,7 @@ class QuestionGenerationAsyncTest {
     when(promptSanitizer.wrapWithDelimiters(anyString(), anyString())).thenReturn("wrapped");
     when(vectorService.similaritySearch(anyString(), anyList(), anyInt(), anyDouble()))
         .thenReturn(List.of(new Document("知识库片段内容")));
-    lenient().when(llmProviderRegistry.getPlainChatClient(nullable(String.class))).thenReturn(chatClient);
+    lenient().when(llmProviderRegistry.getPlainChatClient(eq(1L), nullable(String.class))).thenReturn(chatClient);
 
   }
 
@@ -136,6 +137,7 @@ class QuestionGenerationAsyncTest {
 
   private KnowledgeBaseEntity buildKb(Long id, QuestionGenStatus status, String taskId) {
     KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+        kb.setUserId(1L);
     kb.setId(id);
     kb.setName("测试知识库");
     kb.setFileHash("hash-test");

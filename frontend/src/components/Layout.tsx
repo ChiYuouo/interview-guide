@@ -135,15 +135,14 @@ export default function Layout({username, admin, onLogout}: LayoutProps) {
       ],
     },
   ];
-  if (admin) {
-    navGroups.push({
-      id: 'system',
-      title: '系统',
-      items: [
-        { id: 'settings', path: '/settings', label: '设置', icon: Settings, description: '管理模型和语音服务' },
-      ],
-    });
-  }
+  navGroups.push({
+    id: 'system',
+    title: '设置',
+    items: [
+      { id: 'settings', path: ROUTES.settings, label: '设置', icon: Settings,
+        description: admin ? '管理模型和语音服务' : '配置个人聊天模型' },
+    ],
+  });
 
   // 判断当前页面是否匹配导航项
   const isActive = (path: string) => {

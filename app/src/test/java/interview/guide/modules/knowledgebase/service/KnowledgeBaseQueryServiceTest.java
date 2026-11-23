@@ -35,10 +35,12 @@ import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -67,6 +69,7 @@ class KnowledgeBaseQueryServiceTest {
 
   @BeforeEach
   void setUp() throws Exception {
+    lenient().when(vectorService.ownerOfKnowledgeBases(any())).thenReturn(1L);
     when(resourceLoader.getResource(anyString()))
         .thenAnswer(invocation -> new ByteArrayResource("模板".getBytes(StandardCharsets.UTF_8)));
   }
@@ -86,7 +89,7 @@ class KnowledgeBaseQueryServiceTest {
   }
 
   private void mockPlainClient() {
-    when(llmProviderRegistry.getPlainChatClient()).thenReturn(plainChatClient);
+    when(llmProviderRegistry.getPlainChatClient(1L, null)).thenReturn(plainChatClient);
   }
 
   private void stubDocuments() {
@@ -109,6 +112,21 @@ class KnowledgeBaseQueryServiceTest {
     verifyNoInteractions(vectorService, countService, llmProviderRegistry);
   }
 
+  @Test
+  @DisplayName("缺少个人Embedding配置时同步和流式问答都保留设置提示，不包装成检索错误")
+  void preservesMissingEmbeddingConfigurationMessage() throws Exception {
+    service = buildService(false);
+    when(llmProviderRegistry.getDefaultEmbeddingModel(1L)).thenThrow(
+        new BusinessException(ErrorCode.PROVIDER_CONFIG_READ_FAILED, "请先配置向量模型和 API Key"));
+
+    assertThatThrownBy(() -> service.answerQuestion(List.of(1L), "测试问题"))
+        .isInstanceOf(BusinessException.class).hasMessage("请先配置向量模型和 API Key");
+    assertThatThrownBy(() -> service.answerQuestionStream(List.of(1L), "测试问题", List.of()))
+        .isInstanceOf(BusinessException.class).hasMessage("请先配置向量模型和 API Key");
+    verify(vectorService, never()).similaritySearch(anyString(), anyList(), anyInt(), anyDouble());
+    verifyNoInteractions(countService);
+  }
+
   @Nested
   @DisplayName("ChatClient 选择")
   class ChatClientSelection {
@@ -125,8 +143,8 @@ class KnowledgeBaseQueryServiceTest {
       String answer = service.answerQuestion(List.of(1L), "什么是 Java 内存模型");
 
       assertThat(answer).startsWith("同步回答").contains("参考片段", "[S1]");
-      verify(llmProviderRegistry, atLeastOnce()).getPlainChatClient();
-      verify(llmProviderRegistry, never()).getDefaultChatClient();
+      verify(llmProviderRegistry, atLeastOnce()).getPlainChatClient(1L, null);
+      verify(llmProviderRegistry, never()).getChatClientOrDefault(1L, null);
     }
 
     @Test
@@ -142,8 +160,8 @@ class KnowledgeBaseQueryServiceTest {
           service.answerQuestionStream(List.of(1L), "什么是 Java 内存模型").collectList().block();
 
       assertThat(String.join("", chunks)).startsWith("流式回答").contains("参考片段", "[S1]");
-      verify(llmProviderRegistry, atLeastOnce()).getPlainChatClient();
-      verify(llmProviderRegistry, never()).getDefaultChatClient();
+      verify(llmProviderRegistry, atLeastOnce()).getPlainChatClient(1L, null);
+      verify(llmProviderRegistry, never()).getChatClientOrDefault(1L, null);
     }
   }
 
@@ -655,7 +673,7 @@ class KnowledgeBaseQueryServiceTest {
 
       assertThat(answer).contains("未检索到相关信息");
       assertThat(chunks).hasSize(1);
-      verify(llmProviderRegistry, never()).getPlainChatClient();
+      verify(llmProviderRegistry, never()).getPlainChatClient(1L, null);
     }
 
     @Test
@@ -729,8 +747,8 @@ class KnowledgeBaseQueryServiceTest {
       String answer = service.answerQuestion(List.of(1L), "jmm 是什么");
 
       assertThat(answer).startsWith("同步回答").contains("参考片段");
-      verify(llmProviderRegistry, atLeastOnce()).getPlainChatClient();
-      verify(llmProviderRegistry, never()).getDefaultChatClient();
+      verify(llmProviderRegistry, atLeastOnce()).getPlainChatClient(1L, null);
+      verify(llmProviderRegistry, never()).getChatClientOrDefault(1L, null);
     }
 
     @Test
@@ -746,7 +764,7 @@ class KnowledgeBaseQueryServiceTest {
 
       assertThat(answer).startsWith("同步回答").contains("参考片段");
       verify(plainChatClient.prompt().user(anyString()), never()).call();
-      verify(llmProviderRegistry, never()).getDefaultChatClient();
+      verify(llmProviderRegistry, never()).getChatClientOrDefault(1L, null);
     }
 
     @Test
@@ -763,7 +781,7 @@ class KnowledgeBaseQueryServiceTest {
       String answer = service.answerQuestion(List.of(1L), "什么是 Java 内存模型");
 
       assertThat(answer).startsWith("同步回答").contains("参考片段");
-      verify(llmProviderRegistry, never()).getDefaultChatClient();
+      verify(llmProviderRegistry, never()).getChatClientOrDefault(1L, null);
     }
   }
 }

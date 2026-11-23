@@ -55,7 +55,7 @@ class VoiceInterviewEvaluationServiceTest {
     @Test
     @DisplayName("没有有效对话时应显示暂无评分而不是零分")
     void shouldNotAssignZeroScoreWhenNoConversationExists() {
-        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
             .id(1L)
             .roleType("Java 后端开发")
             .startTime(LocalDateTime.now())

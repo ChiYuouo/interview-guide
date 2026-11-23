@@ -2,6 +2,7 @@ export interface ProviderItem {
   id: string;
   baseUrl: string;
   maskedApiKey: string;
+  apiKeyConfigured: boolean;
   model: string;
   embeddingModel: string | null;
   embeddingDimensions: number | null;
@@ -57,6 +58,7 @@ export interface AsrConfig {
 }
 
 export interface TtsConfig {
+  url: string;
   model: string;
   maskedApiKey: string;
   voice: string;
@@ -82,6 +84,7 @@ export interface AsrConfigRequest {
 }
 
 export interface TtsConfigRequest {
+  url?: string;
   model?: string;
   apiKey?: string;
   voice?: string;

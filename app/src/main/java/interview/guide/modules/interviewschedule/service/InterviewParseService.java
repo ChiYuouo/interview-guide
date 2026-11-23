@@ -78,7 +78,7 @@ public class InterviewParseService {
      * @param source Source platform (feishu/tencent/zoom or null for auto-detect)
      * @return Parse response with extracted interview details
      */
-    public ParseResponse parse(String rawText, String source) {
+    public ParseResponse parse(Long userId, String rawText, String source) {
         log.info("开始解析文本，来源: {}, 文本长度: {}", source, rawText != null ? rawText.length() : 0);
 
         if (rawText == null || rawText.trim().isEmpty()) {
@@ -95,7 +95,7 @@ public class InterviewParseService {
 
         // Step 2: Rule parsing failed, try AI parsing
         log.info("规则解析失败，尝试 AI 解析");
-        result = parseWithAI(rawText);
+        result = parseWithAI(userId, rawText);
         if (isValidResult(result)) {
             log.info("AI 解析成功");
             return new ParseResponse(true, result, 0.8, "ai", "AI 解析成功");
@@ -279,14 +279,14 @@ public class InterviewParseService {
 
     // ========== AI Parsing ==========
 
-    private CreateInterviewRequest parseWithAI(String rawText) {
+    private CreateInterviewRequest parseWithAI(Long userId, String rawText) {
+        ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(userId, null);
         try {
             String systemPrompt = systemPromptTemplate.render(Map.of(
                 "currentDate", LocalDate.now().toString())) + "\n\n" + outputConverter.getFormat();
             String userPrompt = PromptSecurityConstants.DATA_BOUNDARY_INSTRUCTION + "\n" +
                 promptSanitizer.wrapWithDelimiters("parse-input", promptSanitizer.sanitize(rawText));
 
-            ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(null);
             ParsedInviteDTO result = structuredOutputInvoker.invoke(
                 chatClient, systemPrompt, userPrompt, outputConverter,
                 ErrorCode.AI_SERVICE_ERROR, "面试邀约解析失败：", "面试邀约解析", log

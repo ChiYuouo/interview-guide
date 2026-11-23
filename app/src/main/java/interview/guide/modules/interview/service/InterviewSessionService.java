@@ -114,6 +114,7 @@ public class InterviewSessionService {
             }
         }
 
+        String selectedProvider = llmProviderRegistry.resolveChatProviderId(userId, request.llmProvider());
         String sessionId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
         String skillId = request.skillId() != null ? request.skillId() : InterviewDefaults.SKILL_ID;
         String difficulty = request.difficulty() != null ? request.difficulty() : InterviewDefaults.DIFFICULTY;
@@ -127,7 +128,7 @@ public class InterviewSessionService {
 
         // 基于 Skill 生成面试问题
         List<InterviewQuestionDTO> questions = questionService.generateQuestionsBySkill(
-            request.llmProvider(),
+            userId, selectedProvider,
             skillId,
             difficulty,
             request.resumeText(),
@@ -145,7 +146,7 @@ public class InterviewSessionService {
                     request.resumeId(),
                     questions.size(),
                     questions,
-                    request.llmProvider(),
+                    selectedProvider,
                     skillId,
                     difficulty,
                     requestId
@@ -162,7 +163,7 @@ public class InterviewSessionService {
         } else {
             try {
                 persistenceService.saveSession(userId, sessionId, request.resumeId(),
-                    questions.size(), questions, request.llmProvider(), skillId, difficulty);
+                    questions.size(), questions, selectedProvider, skillId, difficulty);
             } catch (Exception e) {
                 log.warn("保存面试会话到数据库失败: {}", e.getMessage());
             }
@@ -203,6 +204,7 @@ public class InterviewSessionService {
             throw new BusinessException(ErrorCode.INTERVIEW_QUESTION_NOT_FOUND, "面试题目不能为空");
         }
 
+        llmProvider = llmProviderRegistry.resolveChatProviderId(userId, llmProvider);
         String sessionId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
         persistenceService.saveSession(
             userId, sessionId, null, questions.size(), questions, llmProvider, skillId, difficulty,
@@ -437,6 +439,10 @@ public class InterviewSessionService {
 
         SessionStatus newStatus = hasNextQuestion ? SessionStatus.IN_PROGRESS : SessionStatus.COMPLETED;
 
+        if (newStatus == SessionStatus.COMPLETED) {
+            var owned = persistenceService.requireOwnedSession(userId, request.sessionId());
+            llmProviderRegistry.resolveChatProviderId(userId, owned.getLlmProvider());
+        }
         persistSubmittedAnswer(userId, request, index, question, newIndex, newStatus);
 
         // 更新 Redis 缓存。DB 已经持久化成功，缓存失败时可由后续读取从数据库恢复。
@@ -483,6 +489,8 @@ public class InterviewSessionService {
     }
 
     private void enqueueEvaluationTask(Long userId, String sessionId) {
+        var owned = persistenceService.requireOwnedSession(userId, sessionId);
+        llmProviderRegistry.resolveChatProviderId(userId, owned.getLlmProvider());
         persistenceService.updateEvaluateStatus(userId, sessionId, AsyncTaskStatus.PENDING, null);
         evaluateStreamProducer.sendEvaluateTask(sessionId);
         log.info("会话 {} 已完成所有问题，评估任务已入队", sessionId);
@@ -533,6 +541,8 @@ public class InterviewSessionService {
      * 提前交卷（触发异步评估）
      */
     public void completeInterview(Long userId, String sessionId) {
+        var owned = persistenceService.requireOwnedSession(userId, sessionId);
+        llmProviderRegistry.resolveChatProviderId(userId, owned.getLlmProvider());
         CachedSession session = getOrRestoreSession(userId, sessionId);
 
         if (session.getStatus() == SessionStatus.COMPLETED || session.getStatus() == SessionStatus.EVALUATED) {
@@ -599,7 +609,7 @@ public class InterviewSessionService {
         if (entityOpt.isPresent()) {
             provider = entityOpt.get().getLlmProvider();
         }
-        ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(provider);
+        ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(userId, provider);
 
         InterviewReportDTO report = evaluationService.evaluateInterview(
             chatClient,

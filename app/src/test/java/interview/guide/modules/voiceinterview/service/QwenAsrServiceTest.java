@@ -2,12 +2,15 @@ package interview.guide.modules.voiceinterview.service;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import interview.guide.modules.llmprovider.service.LlmProviderConfigService;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
+import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
+import interview.guide.modules.voiceinterview.repository.VoiceInterviewSessionRepository;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -22,6 +25,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @DisplayName("QwenAsrService Unit Tests")
 class QwenAsrServiceTest {
@@ -43,20 +49,17 @@ class QwenAsrServiceTest {
         asr.setTurnDetectionThreshold(0.0f);
         asr.setTurnDetectionSilenceDurationMs(400);
 
-        asrService = new QwenAsrService(properties);
-    }
-
-    @Test
-    @DisplayName("Should initialize service successfully")
-    void testInit() {
-        assertDoesNotThrow(() -> asrService.init());
+        var configs = mock(LlmProviderConfigService.class);
+        var sessions = mock(VoiceInterviewSessionRepository.class);
+        when(sessions.findById(anyLong())).thenReturn(Optional.of(
+                VoiceInterviewSessionEntity.builder().userId(7L).build()));
+        when(configs.getAsrRuntimeConfig(7L)).thenReturn(asr);
+        asrService = new QwenAsrService(configs, sessions);
     }
 
     @Test
     @DisplayName("Should start transcription and create session")
     void testStartTranscription() throws Exception {
-        asrService.init();
-
         Long sessionId = 1L;
         AtomicReference<String> resultRef = new AtomicReference<>();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
@@ -77,8 +80,6 @@ class QwenAsrServiceTest {
     @Test
     @DisplayName("Should stop transcription and remove session")
     void testStopTranscription() throws Exception {
-        asrService.init();
-
         Long sessionId = 2L;
         CountDownLatch latch = new CountDownLatch(1);
 
@@ -98,8 +99,6 @@ class QwenAsrServiceTest {
     @Test
     @DisplayName("Should handle multiple concurrent sessions")
     void testMultipleSessions() throws Exception {
-        asrService.init();
-
         Long session1 = 1L;
         Long session2 = 2L;
 
@@ -119,8 +118,6 @@ class QwenAsrServiceTest {
     @Test
     @DisplayName("Should throw exception when sending audio to non-existent session")
     void testSendAudioToNonExistentSession() {
-        asrService.init();
-
         byte[] audioData = new byte[1024];
 
         assertThrows(IllegalStateException.class, () -> {
@@ -149,8 +146,6 @@ class QwenAsrServiceTest {
     @Test
     @DisplayName("Should cleanup resources on destroy")
     void testDestroy() throws Exception {
-        asrService.init();
-
         // Create multiple sessions
         asrService.startTranscription(1L, text -> {}, error -> {});
         asrService.startTranscription(2L, text -> {}, error -> {});
@@ -160,42 +155,6 @@ class QwenAsrServiceTest {
 
         assertFalse(asrService.hasActiveSession(1L));
         assertFalse(asrService.hasActiveSession(2L));
-    }
-
-    @Test
-    @DisplayName("reload 应更新所有 ASR 配置字段")
-    void testReloadUpdatesAllFields() throws Exception {
-        VoiceInterviewProperties newProps = new VoiceInterviewProperties();
-        VoiceInterviewProperties.AsrConfig newAsr = newProps.getQwen().getAsr();
-        newAsr.setUrl("wss://new-host.example.com/ws");
-        newAsr.setModel("new-asr-model");
-        newAsr.setApiKey("new-api-key");
-        newAsr.setLanguage("en");
-        newAsr.setFormat("wav");
-        newAsr.setSampleRate(8000);
-        newAsr.setEnableTurnDetection(false);
-        newAsr.setTurnDetectionType("client_vad");
-        newAsr.setTurnDetectionThreshold(0.5f);
-        newAsr.setTurnDetectionSilenceDurationMs(200);
-
-        asrService.reload(newProps);
-
-        assertEquals("wss://new-host.example.com/ws", field(asrService, "url"));
-        assertEquals("new-asr-model", field(asrService, "model"));
-        assertEquals("new-api-key", field(asrService, "apiKey"));
-        assertEquals("en", field(asrService, "language"));
-        assertEquals("wav", field(asrService, "format"));
-        assertEquals(8000, field(asrService, "sampleRate"));
-        assertEquals(false, field(asrService, "enableTurnDetection"));
-        assertEquals("client_vad", field(asrService, "turnDetectionType"));
-        assertEquals(0.5f, field(asrService, "turnDetectionThreshold"));
-        assertEquals(200, field(asrService, "turnDetectionSilenceDurationMs"));
-    }
-
-    private static Object field(Object obj, String name) throws Exception {
-        java.lang.reflect.Field f = obj.getClass().getDeclaredField(name);
-        f.setAccessible(true);
-        return f.get(obj);
     }
 
     @Nested

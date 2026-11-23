@@ -2,6 +2,7 @@ package interview.guide.modules.voiceinterview.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
+import interview.guide.modules.llmprovider.service.LlmProviderConfigService;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewHandshakeInterceptor;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.context.VoiceContextCompressor;
@@ -25,23 +26,22 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.time.LocalDateTime;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,6 +54,8 @@ class VoiceInterviewWebSocketHandlerTest {
   private QwenAsrService sttService;
   @Mock
   private QwenTtsService ttsService;
+  @Mock
+  private LlmProviderConfigService providerConfigService;
   @Mock
   private DashscopeLlmService llmService;
   @Mock
@@ -97,41 +99,28 @@ class VoiceInterviewWebSocketHandlerTest {
   }
 
   @Test
-  @DisplayName("默认关闭开场音频预热，应用启动时不调用云端 TTS")
-  void shouldNotWarmupOpeningAudioByDefault() throws InterruptedException {
-    VoiceInterviewProperties properties = new VoiceInterviewProperties();
-    CountDownLatch ttsCalled = new CountDownLatch(1);
-    lenient().when(ttsService.synthesize(anyString())).thenAnswer(invocation -> {
-      ttsCalled.countDown();
-      return new byte[0];
-    });
-    handler = newHandler(properties);
+  @DisplayName("同一开场白只在同一账号且配置未更新时复用音频")
+  void cachesOpeningAudioByAccountAndSettingsVersion() {
+    handler = newHandler(new VoiceInterviewProperties());
+    var version = LocalDateTime.of(2026, 1, 1, 9, 0);
+    String text = "你好，开始面试。";
+    when(providerConfigService.getVoiceSettingsUpdatedAt(7L))
+        .thenReturn(version, version, version.plusSeconds(1));
+    when(providerConfigService.getVoiceSettingsUpdatedAt(8L)).thenReturn(version);
+    when(ttsService.synthesize(7L, text)).thenReturn(new byte[]{1, 0}, new byte[]{3, 0});
+    when(ttsService.synthesize(8L, text)).thenReturn(new byte[]{2, 0});
 
-    assertThat(properties.isOpeningAudioWarmupEnabled()).isFalse();
+    byte[] first = ReflectionTestUtils.invokeMethod(handler, "getOpeningWavAudio", 7L, text);
+    byte[] cached = ReflectionTestUtils.invokeMethod(handler, "getOpeningWavAudio", 7L, text);
+    byte[] other = ReflectionTestUtils.invokeMethod(handler, "getOpeningWavAudio", 8L, text);
+    byte[] updated = ReflectionTestUtils.invokeMethod(handler, "getOpeningWavAudio", 7L, text);
 
-    handler.warmupOpeningAudioCache();
-
-    assertThat(ttsCalled.await(300, TimeUnit.MILLISECONDS)).isFalse();
-  }
-
-  @Test
-  @DisplayName("显式开启开场音频预热后才调用云端 TTS")
-  void shouldWarmupOpeningAudioWhenExplicitlyEnabled() throws InterruptedException {
-    VoiceInterviewProperties properties = new VoiceInterviewProperties();
-    properties.setOpeningAudioWarmupEnabled(true);
-    properties.getOpening().setSkillQuestions(Map.of("java-backend", "你好，开始面试。"));
-    properties.getOpening().setAlgorithmQuestion("");
-    properties.getOpening().setBackendQuestion("");
-    CountDownLatch ttsCalled = new CountDownLatch(1);
-    when(ttsService.synthesize("你好，开始面试。")).thenAnswer(invocation -> {
-      ttsCalled.countDown();
-      return new byte[0];
-    });
-    handler = newHandler(properties);
-
-    handler.warmupOpeningAudioCache();
-
-    assertThat(ttsCalled.await(1, TimeUnit.SECONDS)).isTrue();
+    assertThat(first).endsWith((byte) 1, (byte) 0);
+    assertThat(cached).containsExactly(first);
+    assertThat(other).endsWith((byte) 2, (byte) 0);
+    assertThat(updated).endsWith((byte) 3, (byte) 0);
+    verify(ttsService, times(2)).synthesize(7L, text);
+    verify(ttsService).synthesize(8L, text);
   }
 
   @Test
@@ -174,6 +163,7 @@ class VoiceInterviewWebSocketHandlerTest {
         handlerObjectMapper,
         sttService,
         ttsService,
+        providerConfigService,
         llmService,
         interviewService,
         voiceContextCompressor,

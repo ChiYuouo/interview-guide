@@ -1,7 +1,10 @@
 package interview.guide.modules.voiceinterview.context;
 
+import static org.mockito.Mockito.lenient;
+
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewMessageEntity;
+import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import interview.guide.modules.voiceinterview.repository.VoiceInterviewMessageRepository;
 import interview.guide.modules.voiceinterview.service.VoiceInterviewService;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,6 +53,7 @@ class VoiceHistoryLoaderTest {
 
   @BeforeEach
   void setUp() {
+    lenient().when(interviewService.getSession(anyLong())).thenReturn(VoiceInterviewSessionEntity.builder().userId(1L).build());
     properties = new VoiceInterviewProperties();
     properties.getContextCompression().setEnabled(true);
     properties.getContextCompression().setWindowSize(20);
@@ -89,7 +93,7 @@ class VoiceHistoryLoaderTest {
     when(interviewService.loadSummaryRow(1L)).thenReturn(Optional.of(summaryRow(-1, 9980)));
     when(messageRepository.findBySessionIdAndMessageTypeNotAndSequenceNumGreaterThanAndSequenceNumLessThanOrderBySequenceNumAsc(
         any(), anyString(), eq(9980), eq(9981), any(Pageable.class))).thenReturn(List.of());
-    when(compressor.compress(any(), anyString(), eq(0), isNull()))
+    when(compressor.compress(eq(1L), any(), anyString(), eq(0), isNull()))
         .thenReturn(new VoiceContextCompressor.CompressedHistory("已有摘要", List.of(), 0, false));
     when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题10000"));
 
@@ -116,7 +120,7 @@ class VoiceHistoryLoaderTest {
         any(), anyString(), eq(20), eq(31), any(Pageable.class)))
         .thenReturn(java.util.stream.IntStream.rangeClosed(21, 30).mapToObj(this::msg).toList());
     // compressor 摘要了全部 10 条 pending → coveredTurns=10
-    when(compressor.compress(any(), anyString(), eq(0), isNull()))
+    when(compressor.compress(eq(1L), any(), anyString(), eq(0), isNull()))
         .thenReturn(new VoiceContextCompressor.CompressedHistory("新摘要", List.of(), 10, true));
     when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题50"));
 
@@ -136,7 +140,7 @@ class VoiceHistoryLoaderTest {
         any(), anyString(), any(Pageable.class))).thenReturn(List.of(msg(15)));
     when(messageRepository.findBySessionIdAndMessageTypeNotAndSequenceNumGreaterThanAndSequenceNumLessThanOrderBySequenceNumAsc(
         any(), anyString(), eq(15), eq(17), any(Pageable.class))).thenReturn(List.of());
-    when(compressor.compress(any(), anyString(), eq(0), isNull()))
+    when(compressor.compress(eq(1L), any(), anyString(), eq(0), isNull()))
         .thenReturn(new VoiceContextCompressor.CompressedHistory("已有摘要", List.of(), 0, false));
     when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题36"));
 
@@ -196,7 +200,7 @@ class VoiceHistoryLoaderTest {
     void newSessionWindowOnly() {
       stubWindow(1, 5);
       when(interviewService.loadSummaryRow(1L)).thenReturn(Optional.empty());
-      when(compressor.compress(any(), isNull(), eq(0), isNull()))
+      when(compressor.compress(eq(1L), any(), isNull(), eq(0), isNull()))
           .thenReturn(new VoiceContextCompressor.CompressedHistory(null, List.of(), 0, false));
       when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题5"));
 
@@ -217,7 +221,7 @@ class VoiceHistoryLoaderTest {
       when(messageRepository.findBySessionIdAndMessageTypeNotAndSequenceNumGreaterThanAndSequenceNumLessThanOrderBySequenceNumAsc(
           any(), anyString(), eq(0), eq(31), any(Pageable.class)))
           .thenReturn(java.util.stream.IntStream.rangeClosed(1, 10).mapToObj(i -> msg(i * 3)).toList());
-      when(compressor.compress(any(), isNull(), eq(0), isNull()))
+      when(compressor.compress(eq(1L), any(), isNull(), eq(0), isNull()))
           .thenReturn(new VoiceContextCompressor.CompressedHistory("首批摘要", List.of(), 10, true));
       when(compressor.formatRecent(any())).thenReturn(List.of("面试官：问题50"));
 

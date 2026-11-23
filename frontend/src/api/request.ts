@@ -20,6 +20,15 @@ const SUCCESS_CODE = 200;
 const RESULT_BLOB_PARSE_LIMIT = 64 * 1024;
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+export const MODEL_CONFIGURATION_REQUIRED_EVENT = 'model-configuration-required';
+
+function createApiError(message: string): Error {
+  if (message.includes('配置') && (message.includes('模型') || message.includes('语音') || message.includes('API Key'))) {
+    window.dispatchEvent(new CustomEvent(MODEL_CONFIGURATION_REQUIRED_EVENT, { detail: message }));
+  }
+  return new Error(message);
+}
+
 export const SESSION_EXPIRED_EVENT = 'interview:session-expired';
 
 export class SessionExpiredError extends Error {
@@ -64,7 +73,7 @@ export function getResultError(value: unknown): Error | null {
   if (!isResult(value) || value.code === SUCCESS_CODE) {
     return null;
   }
-  return new Error(value.message || '请求失败');
+  return createApiError(value.message || '请求失败');
 }
 
 function parseResultText(text: string): Result | null {
@@ -125,7 +134,7 @@ async function getErrorFromResponseData(data: unknown): Promise<Error | null> {
     return null;
   }
 
-  return new Error(result.message || '请求失败');
+  return createApiError(result.message || '请求失败');
 }
 
 /**
@@ -151,7 +160,7 @@ instance.interceptors.response.use(
         return response;
       }
       // 失败：直接抛出 message
-      return Promise.reject(new Error(result.message || '请求失败'));
+      return Promise.reject(createApiError(result.message || '请求失败'));
     }
     
     // 非 Result 格式，直接返回

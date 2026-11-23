@@ -48,9 +48,9 @@ public class InterviewScheduleController {
      * @return 解析结果
      */
     @PostMapping("/parse")
-    public Result<ParseResponse> parse(@Valid @RequestBody ParseRequest request) {
+    public Result<ParseResponse> parse(@AuthenticationPrincipal AccountPrincipal account, @Valid @RequestBody ParseRequest request) {
         log.info("接收到解析请求，来源: {}", request.getSource());
-        ParseResponse response = parseService.parse(request.getRawText(), request.getSource());
+        ParseResponse response = parseService.parse(account.getUserId(), request.getRawText(), request.getSource());
         return Result.success(response);
     }
 

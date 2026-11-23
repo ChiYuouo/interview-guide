@@ -1,6 +1,7 @@
 package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.constant.CommonConstants.InterviewDefaults;
+import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.knowledgebase.listener.QuestionGenStreamProducer;
@@ -46,6 +47,7 @@ public class KnowledgeBaseQuestionService {
   private final ObjectMapper objectMapper;
   private final QuestionGenStreamProducer questionGenStreamProducer;
   private final QuestionGenerationStateService questionGenerationStateService;
+  private final LlmProviderRegistry registry;
 
   @Transactional(readOnly = true)
   public List<KnowledgeBaseQuestionDTO> listQuestions(Long userId, Long knowledgeBaseId,
@@ -161,12 +163,13 @@ public class KnowledgeBaseQuestionService {
     int categoryLimit = request.categoryLimit() == null
         ? DEFAULT_CATEGORY_LIMIT
         : Math.max(1, Math.min(request.categoryLimit(), 5));
+    String selectedProvider = registry.resolveChatProviderId(userId, request.llmProvider());
     QuestionGenerationConfig config = new QuestionGenerationConfig(
         difficulty,
         Math.max(1, request.questionCount()),
         followUpCount,
         categoryLimit,
-        trimToNull(request.llmProvider())
+        selectedProvider
     );
     QuestionGenStatusResponse response =
         questionGenerationStateService.createTask(userId, knowledgeBaseId, config);

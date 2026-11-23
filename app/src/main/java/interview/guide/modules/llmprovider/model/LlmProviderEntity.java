@@ -3,10 +3,12 @@ package interview.guide.modules.llmprovider.model;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.IdClass;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.io.Serializable;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -17,8 +19,13 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
+@IdClass(LlmProviderEntity.Key.class)
 @Table(name = "llm_provider_config")
 public class LlmProviderEntity {
+
+  @Id
+  @Column(name = "user_id", nullable = false)
+  private Long userId;
 
   @Id
   @Column(length = 64)
@@ -27,10 +34,10 @@ public class LlmProviderEntity {
   @Column(name = "base_url", nullable = false, length = 512)
   private String baseUrl;
 
-  @Column(name = "api_key_ciphertext", nullable = false, length = 4096)
+  @Column(name = "api_key_ciphertext", columnDefinition = "TEXT")
   private String apiKeyCiphertext;
 
-  @Column(name = "api_key_nonce", nullable = false, length = 64)
+  @Column(name = "api_key_nonce", length = 64)
   private String apiKeyNonce;
 
   @Column(nullable = false, length = 128)
@@ -69,5 +76,13 @@ public class LlmProviderEntity {
   @PreUpdate
   void preUpdate() {
     updatedAt = LocalDateTime.now();
+  }
+
+  @Data
+  @NoArgsConstructor
+  @AllArgsConstructor
+  public static class Key implements Serializable {
+    private Long userId;
+    private String id;
   }
 }

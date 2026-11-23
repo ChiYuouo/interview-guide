@@ -119,7 +119,7 @@ public class InterviewQuestionService {
     }
 
     public List<InterviewQuestionDTO> generateQuestionsBySkill(
-            String llmProvider,
+            Long userId, String llmProvider,
             String skillId,
             String difficulty,
             String resumeText,
@@ -131,7 +131,7 @@ public class InterviewQuestionService {
         SkillDTO skill = resolveSkill(skillId, customCategories, jdText);
         String difficultyDesc = resolveDifficulty(difficulty);
         ChatClient questionChatClient =
-            llmProviderRegistry.getPlainChatClient(llmProvider);
+            llmProviderRegistry.getPlainChatClient(userId, llmProvider);
 
         boolean hasResume = resumeText != null && !resumeText.isBlank();
         String historicalSection = buildHistoricalSection(historicalQuestions);

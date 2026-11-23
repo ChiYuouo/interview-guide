@@ -48,7 +48,7 @@ test('登录后返回原页面，刷新保持会话，退出后重新要求登�
   await expect(page.getByRole('heading', { name: '登录面试工作台' })).toBeVisible();
 });
 
-test('普通账号可以打开知识库和面试，系统设置仍受限', async ({ page }) => {
+test('普通账号可以打开知识库、面试和个人模型设置', async ({ page }) => {
   await page.route('**/api/auth/session', route => route.fulfill({
     json: { code: 200, message: 'success', data: { username: 'trial', admin: false } },
   }));
@@ -56,6 +56,9 @@ test('普通账号可以打开知识库和面试，系统设置仍受限', async
     json: { code: 200, message: 'success', data: [] },
   }));
   await page.route('**/api/resumes', route => route.fulfill({
+    json: { code: 200, message: 'success', data: [] },
+  }));
+  await page.route('**/api/llm-provider/**', route => route.fulfill({
     json: { code: 200, message: 'success', data: [] },
   }));
   await page.route('**/api/interview/**', route => route.fulfill({
@@ -84,9 +87,10 @@ test('普通账号可以打开知识库和面试，系统设置仍受限', async
   await page.getByRole('link', { name: /问答助手/ }).click();
   await expect(page).toHaveURL(/\/knowledgebase\/chat$/);
   await page.goto('/settings');
-  await expect(page).toHaveURL(/\/interview-schedule$/);
-  await expect(page.getByRole('link', { name: /面试日程/ })).toBeVisible();
-  await expect(page.getByRole('link', { name: /设置/ })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByRole('heading', { name: '系统设置', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: /设置/ })).toHaveCount(1);
+  await expect(page.getByRole('tab', { name: '系统配置' })).toHaveCount(0);
   await page.getByRole('link', { name: /简历管理/ }).click();
   await expect(page).toHaveURL(/\/history$/);
   await expect(page.getByRole('heading', { name: '简历管理' })).toBeVisible();

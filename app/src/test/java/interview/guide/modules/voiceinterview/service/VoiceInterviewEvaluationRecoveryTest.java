@@ -109,7 +109,7 @@ class VoiceInterviewEvaluationRecoveryTest {
     @Test
     @DisplayName("长时间停留在 PENDING 的评估应自动重新投递")
     void shouldRequeueStalePendingEvaluation() {
-        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
             .id(3L)
             .status(VoiceInterviewSessionStatus.COMPLETED)
             .evaluateStatus(AsyncTaskStatus.PENDING)
@@ -137,7 +137,7 @@ class VoiceInterviewEvaluationRecoveryTest {
     @Test
     @DisplayName("评估状态更新后应清除会话缓存")
     void shouldInvalidateSessionCacheAfterEvaluationStatusChanges() {
-        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
             .id(4L)
             .evaluateStatus(AsyncTaskStatus.PENDING)
             .build();
@@ -174,7 +174,7 @@ class VoiceInterviewEvaluationRecoveryTest {
     }
 
     private VoiceInterviewSessionEntity inProgressSession(Long sessionId) {
-        return VoiceInterviewSessionEntity.builder()
+        return VoiceInterviewSessionEntity.builder().userId(1L)
             .id(sessionId)
             .status(VoiceInterviewSessionStatus.IN_PROGRESS)
             .startTime(LocalDateTime.now().minusMinutes(5))

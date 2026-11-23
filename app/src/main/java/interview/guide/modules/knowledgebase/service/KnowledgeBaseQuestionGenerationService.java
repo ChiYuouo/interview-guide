@@ -118,7 +118,7 @@ public class KnowledgeBaseQuestionGenerationService {
     String context = buildGenerationContext(kb);
 
     // 2. 调用 LLM（不在事务中）
-    ChatClient chatClient = llmProviderRegistry.getPlainChatClient(config.llmProvider());
+    ChatClient chatClient = llmProviderRegistry.getPlainChatClient(kb.getUserId(), config.llmProvider());
     QuestionListDTO generated = callLlm(kb, chatClient, normalizedDifficulty,
         Math.max(1, config.questionCount()), normalizedFollowUp, normalizedCategoryLimit, context);
 

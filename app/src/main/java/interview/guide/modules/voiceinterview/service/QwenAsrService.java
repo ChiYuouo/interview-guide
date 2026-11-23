@@ -10,11 +10,16 @@ import com.alibaba.dashscope.exception.NoApiKeyException;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import interview.guide.common.log.ErrorLogSanitizer;
-import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
+import interview.guide.modules.llmprovider.service.LlmProviderConfigService;
+import interview.guide.modules.voiceinterview.repository.VoiceInterviewSessionRepository;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.Response;
+import okhttp3.WebSocket;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.Base64;
 import java.util.Collections;
@@ -49,50 +54,11 @@ import java.util.function.Consumer;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class QwenAsrService {
+    private final LlmProviderConfigService configs;
+    private final VoiceInterviewSessionRepository sessionRepository;
 
-    // Runtime configuration values (loaded from VoiceInterviewProperties; setters kept for tests)
-    private String url;
-
-    private String model;
-
-    private String apiKey;
-
-    private String language;
-
-    private String format;
-
-    private Integer sampleRate;
-
-    private Boolean enableTurnDetection;
-
-    private String turnDetectionType;
-
-    private Float turnDetectionThreshold;
-
-    private Integer turnDetectionSilenceDurationMs;
-
-    public QwenAsrService(VoiceInterviewProperties voiceInterviewProperties) {
-        applyAsrConfig(voiceInterviewProperties.getQwen().getAsr());
-    }
-
-    public void reload(VoiceInterviewProperties voiceInterviewProperties) {
-        applyAsrConfig(voiceInterviewProperties.getQwen().getAsr());
-        log.info("QwenAsrService reloaded: model={}, url={}", model, url);
-    }
-
-    private void applyAsrConfig(VoiceInterviewProperties.AsrConfig asr) {
-        this.url = asr.getUrl();
-        this.model = asr.getModel();
-        this.apiKey = asr.getApiKey();
-        this.language = asr.getLanguage();
-        this.format = asr.getFormat();
-        this.sampleRate = asr.getSampleRate();
-        this.enableTurnDetection = asr.isEnableTurnDetection();
-        this.turnDetectionType = asr.getTurnDetectionType();
-        this.turnDetectionThreshold = asr.getTurnDetectionThreshold();
-        this.turnDetectionSilenceDurationMs = asr.getTurnDetectionSilenceDurationMs();
-    }
 
     /**
      * Active ASR sessions map.
@@ -106,21 +72,6 @@ public class QwenAsrService {
 
     private Object lockForSession(Long sessionId) {
         return sessionLocks.computeIfAbsent(sessionId, k -> new Object());
-    }
-
-    /**
-     * Initialize the ASR service.
-     * This method is automatically called by Spring after the service is constructed
-     * and all configuration values have been loaded from VoiceInterviewProperties.
-     *
-     * @throws IllegalStateException if apiKey is not configured
-     */
-    @PostConstruct
-    public void init() {
-        if (apiKey == null || apiKey.trim().isEmpty()) {
-            throw new IllegalStateException("API key must be configured before initializing QwenAsrService");
-        }
-        log.info("QwenAsrService initialized with model: {}, url: {}", model, url);
     }
 
     /**
@@ -224,12 +175,16 @@ public class QwenAsrService {
             throw new IllegalStateException("Session already exists: " + sessionId);
         }
 
+        var session = sessionRepository.findById(sessionId).orElseThrow(() ->
+                new BusinessException(ErrorCode.VOICE_SESSION_NOT_FOUND, "语音面试会话不存在"));
+        var runtime = configs.getAsrRuntimeConfig(session.getUserId());
+
         try {
             // Build OmniRealtimeParam with connection settings
             OmniRealtimeParam param = OmniRealtimeParam.builder()
-                    .model(model)
-                    .url(url)
-                    .apikey(apiKey)
+                    .model(runtime.getModel())
+                    .url(runtime.getUrl())
+                    .apikey(runtime.getApiKey())
                     .build();
 
             final AtomicReference<OmniRealtimeConversation> conversationRef = new AtomicReference<>();
@@ -261,8 +216,16 @@ public class QwenAsrService {
                 }
             };
 
-            // Create OmniRealtimeConversation instance
-            OmniRealtimeConversation conversation = new OmniRealtimeConversation(param, callback);
+            // SDK 在握手失败时不会唤醒 connect()，主动中断等待线程以反馈账号配置错误。
+            AtomicReference<Thread> connectionThreadRef = new AtomicReference<>();
+            OmniRealtimeConversation conversation = new OmniRealtimeConversation(param, callback) {
+                @Override
+                public void onFailure(WebSocket socket, Throwable failure, Response response) {
+                    super.onFailure(socket, failure, response);
+                    Thread waiting = connectionThreadRef.get();
+                    if (waiting != null) waiting.interrupt();
+                }
+            };
             conversationRef.set(conversation);
             AsrSession asrSession = new AsrSession(conversation, onFinal, onPartial, onError);
 
@@ -276,16 +239,16 @@ public class QwenAsrService {
 
                     // Configure session with transcription parameters
                     OmniRealtimeTranscriptionParam transcriptionParam = new OmniRealtimeTranscriptionParam();
-                    transcriptionParam.setLanguage(language);
-                    transcriptionParam.setInputSampleRate(sampleRate);
-                    transcriptionParam.setInputAudioFormat(format);
+                    transcriptionParam.setLanguage(runtime.getLanguage());
+                    transcriptionParam.setInputSampleRate(runtime.getSampleRate());
+                    transcriptionParam.setInputAudioFormat(runtime.getFormat());
 
                     OmniRealtimeConfig config = OmniRealtimeConfig.builder()
                             .modalities(Collections.singletonList(OmniRealtimeModality.TEXT))
-                            .enableTurnDetection(enableTurnDetection)
-                            .turnDetectionType(turnDetectionType)
-                            .turnDetectionThreshold(turnDetectionThreshold)
-                            .turnDetectionSilenceDurationMs(turnDetectionSilenceDurationMs)
+                            .enableTurnDetection(runtime.isEnableTurnDetection())
+                            .turnDetectionType(runtime.getTurnDetectionType())
+                            .turnDetectionThreshold(runtime.getTurnDetectionThreshold())
+                            .turnDetectionSilenceDurationMs(runtime.getTurnDetectionSilenceDurationMs())
                             .transcriptionConfig(transcriptionParam)
                             .build();
 
@@ -303,6 +266,7 @@ public class QwenAsrService {
                     log.info("[Session: {}] Transcription session started successfully", sessionId);
 
                 } catch (Exception e) {
+                    if (e instanceof InterruptedException) Thread.currentThread().interrupt();
                     log.error("[Session: {}] Failed to establish connection", sessionId, e);
                     sessions.compute(sessionId, (id, existing) -> {
                         if (existing != null && existing.getConversation() == conversation) {
@@ -314,6 +278,7 @@ public class QwenAsrService {
                 }
             }, "ASR-Connection-" + sessionId);
             connectionThread.setDaemon(true);
+            connectionThreadRef.set(connectionThread);
             connectionThread.start();
 
         } catch (Exception e) {
@@ -646,47 +611,5 @@ public class QwenAsrService {
         boolean awaitReady(long timeoutMs) throws InterruptedException {
             return readyLatch.await(timeoutMs, TimeUnit.MILLISECONDS);
         }
-    }
-
-    // Setter methods for configuration (used by Spring @Value injection or tests)
-
-    public void setUrl(String url) {
-        this.url = url;
-    }
-
-    public void setModel(String model) {
-        this.model = model;
-    }
-
-    public void setApiKey(String apiKey) {
-        this.apiKey = apiKey;
-    }
-
-    public void setLanguage(String language) {
-        this.language = language;
-    }
-
-    public void setFormat(String format) {
-        this.format = format;
-    }
-
-    public void setSampleRate(Integer sampleRate) {
-        this.sampleRate = sampleRate;
-    }
-
-    public void setEnableTurnDetection(Boolean enableTurnDetection) {
-        this.enableTurnDetection = enableTurnDetection;
-    }
-
-    public void setTurnDetectionType(String turnDetectionType) {
-        this.turnDetectionType = turnDetectionType;
-    }
-
-    public void setTurnDetectionThreshold(Float turnDetectionThreshold) {
-        this.turnDetectionThreshold = turnDetectionThreshold;
-    }
-
-    public void setTurnDetectionSilenceDurationMs(Integer turnDetectionSilenceDurationMs) {
-        this.turnDetectionSilenceDurationMs = turnDetectionSilenceDurationMs;
     }
 }

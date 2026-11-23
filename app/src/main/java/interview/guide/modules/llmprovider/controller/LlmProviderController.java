@@ -2,6 +2,8 @@ package interview.guide.modules.llmprovider.controller;
 
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.result.Result;
+import interview.guide.modules.auth.model.AccountPrincipal;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import interview.guide.modules.llmprovider.dto.AsrConfigDTO;
 import interview.guide.modules.llmprovider.dto.AsrConfigRequest;
 import interview.guide.modules.llmprovider.dto.CreateProviderRequest;
@@ -36,42 +38,42 @@ public class LlmProviderController {
 
   @GetMapping("/list")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
-  public Result<List<ProviderDTO>> listProviders() {
-    return Result.success(configService.listProviders());
+  public Result<List<ProviderDTO>> listProviders(@AuthenticationPrincipal AccountPrincipal account) {
+    return Result.success(configService.listProviders(account.getUserId()));
   }
 
   @GetMapping("/{id}")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
-  public Result<ProviderDTO> getProvider(@PathVariable String id) {
-    return Result.success(configService.getProvider(id));
+  public Result<ProviderDTO> getProvider(@AuthenticationPrincipal AccountPrincipal account, @PathVariable String id) {
+    return Result.success(configService.getProvider(account.getUserId(), id));
   }
 
   @PostMapping
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
-  public Result<Void> createProvider(@RequestBody @Valid CreateProviderRequest request) {
-    configService.createProvider(request);
+  public Result<Void> createProvider(@AuthenticationPrincipal AccountPrincipal account, @RequestBody @Valid CreateProviderRequest request) {
+    configService.createProvider(account.getUserId(), request);
     return Result.success();
   }
 
   @PutMapping("/{id}")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
-  public Result<Void> updateProvider(@PathVariable String id,
+  public Result<Void> updateProvider(@AuthenticationPrincipal AccountPrincipal account, @PathVariable String id,
       @RequestBody UpdateProviderRequest request) {
-    configService.updateProvider(id, request);
+    configService.updateProvider(account.getUserId(), id, request);
     return Result.success();
   }
 
   @DeleteMapping("/{id}")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
-  public Result<Void> deleteProvider(@PathVariable String id) {
-    configService.deleteProvider(id);
+  public Result<Void> deleteProvider(@AuthenticationPrincipal AccountPrincipal account, @PathVariable String id) {
+    configService.deleteProvider(account.getUserId(), id);
     return Result.success();
   }
 
   @PostMapping("/{id}/test")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
-  public Result<ProviderTestResult> testProvider(@PathVariable String id) {
-    return Result.success(configService.testProvider(id));
+  public Result<ProviderTestResult> testProvider(@AuthenticationPrincipal AccountPrincipal account, @PathVariable String id) {
+    return Result.success(configService.testProvider(account.getUserId(), id));
   }
 
   @PostMapping("/reload")
@@ -83,21 +85,21 @@ public class LlmProviderController {
 
   @GetMapping("/default-provider")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
-  public Result<DefaultProviderDTO> getDefaultProvider() {
-    return Result.success(configService.getDefaultProvider());
+  public Result<DefaultProviderDTO> getDefaultProvider(@AuthenticationPrincipal AccountPrincipal account) {
+    return Result.success(configService.getDefaultProvider(account.getUserId()));
   }
 
   @PutMapping("/default-provider")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
-  public Result<Void> updateDefaultProvider(@RequestBody DefaultProviderDTO request) {
-    configService.updateDefaultProvider(request);
+  public Result<Void> updateDefaultProvider(@AuthenticationPrincipal AccountPrincipal account, @RequestBody DefaultProviderDTO request) {
+    configService.updateDefaultProvider(account.getUserId(), request);
     return Result.success();
   }
 
   @PutMapping("/default-embedding-provider")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
-  public Result<Void> updateDefaultEmbeddingProvider(@RequestBody DefaultProviderDTO request) {
-    configService.updateDefaultEmbeddingProvider(request);
+  public Result<Void> updateDefaultEmbeddingProvider(@AuthenticationPrincipal AccountPrincipal account, @RequestBody DefaultProviderDTO request) {
+    configService.updateDefaultEmbeddingProvider(account.getUserId(), request);
     return Result.success();
   }
 
@@ -105,33 +107,33 @@ public class LlmProviderController {
 
   @GetMapping("/voice/asr")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
-  public Result<AsrConfigDTO> getAsrConfig() {
-    return Result.success(configService.getAsrConfig());
+  public Result<AsrConfigDTO> getAsrConfig(@AuthenticationPrincipal AccountPrincipal account) {
+    return Result.success(configService.getAsrConfig(account.getUserId()));
   }
 
   @PutMapping("/voice/asr")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
-  public Result<Void> updateAsrConfig(@RequestBody AsrConfigRequest request) {
-    configService.updateAsrConfig(request);
+  public Result<Void> updateAsrConfig(@AuthenticationPrincipal AccountPrincipal account, @RequestBody AsrConfigRequest request) {
+    configService.updateAsrConfig(account.getUserId(), request);
     return Result.success();
   }
 
   @GetMapping("/voice/tts")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 30)
-  public Result<TtsConfigDTO> getTtsConfig() {
-    return Result.success(configService.getTtsConfig());
+  public Result<TtsConfigDTO> getTtsConfig(@AuthenticationPrincipal AccountPrincipal account) {
+    return Result.success(configService.getTtsConfig(account.getUserId()));
   }
 
   @PutMapping("/voice/tts")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
-  public Result<Void> updateTtsConfig(@RequestBody TtsConfigRequest request) {
-    configService.updateTtsConfig(request);
+  public Result<Void> updateTtsConfig(@AuthenticationPrincipal AccountPrincipal account, @RequestBody TtsConfigRequest request) {
+    configService.updateTtsConfig(account.getUserId(), request);
     return Result.success();
   }
 
   @PostMapping("/voice/asr/test")
   @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
-  public Result<ProviderTestResult> testAsrConfig() {
-    return Result.success(configService.testAsrConfig());
+  public Result<ProviderTestResult> testAsrConfig(@AuthenticationPrincipal AccountPrincipal account) {
+    return Result.success(configService.testAsrConfig(account.getUserId()));
   }
 }

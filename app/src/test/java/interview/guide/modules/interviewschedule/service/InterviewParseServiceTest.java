@@ -72,7 +72,7 @@ class InterviewParseServiceTest {
   @Test
   @DisplayName("飞书规则命中时正确提取中文轮次并跳过模型")
   void parsesFeishuInviteWithoutAi() {
-    var response = service.parse("""
+    var response = service.parse(1L, """
         公司：星河科技
         岗位：Java工程师
         时间：2026-11-25 14:00
@@ -94,7 +94,7 @@ class InterviewParseServiceTest {
   void fallsBackToDefaultModel(String source) {
     stubModel(STRUCTURED_INVITE);
 
-    var response = service.parse(RAW_INVITE, source);
+    var response = service.parse(1L, RAW_INVITE, source);
 
     assertThat(response.getSuccess()).isTrue();
     assertThat(response.getParseMethod()).isEqualTo("ai");
@@ -103,7 +103,7 @@ class InterviewParseServiceTest {
     assertThat(response.getData().getInterviewTime()).isEqualTo(INTERVIEW_TIME);
     assertThat(response.getData().getRoundNumber()).isEqualTo(2);
     assertThat(response.getData().getMeetingLink()).isNull();
-    verify(registry).getChatClientOrDefault(null);
+    verify(registry).getChatClientOrDefault(1L, null);
 
     var prompt = ArgumentCaptor.forClass(Prompt.class);
     verify(model).call(prompt.capture());
@@ -118,7 +118,7 @@ class InterviewParseServiceTest {
   void retriesMalformedOutput() {
     stubModel("这是一条面试邀约。").thenReturn(modelResponse(STRUCTURED_INVITE));
 
-    var response = service.parse(RAW_INVITE, "feishu");
+    var response = service.parse(1L, RAW_INVITE, "feishu");
 
     assertThat(response.getSuccess()).isTrue();
     assertThat(response.getData().getInterviewTime()).isEqualTo(INTERVIEW_TIME);
@@ -141,7 +141,7 @@ class InterviewParseServiceTest {
   void rejectsIncompleteModelResult(String output) {
     stubModel(output);
 
-    var response = service.parse(RAW_INVITE, "feishu");
+    var response = service.parse(1L, RAW_INVITE, "feishu");
 
     assertThat(response.getSuccess()).isFalse();
     assertThat(response.getParseMethod()).isEqualTo("none");
@@ -151,7 +151,7 @@ class InterviewParseServiceTest {
 
   private OngoingStubbing<ChatResponse> stubModel(String output) {
     when(model.getOptions()).thenCallRealMethod();
-    when(registry.getChatClientOrDefault(null)).thenReturn(ChatClient.builder(model).build());
+    when(registry.getChatClientOrDefault(1L, null)).thenReturn(ChatClient.builder(model).build());
     return when(model.call(any(Prompt.class))).thenReturn(modelResponse(output));
   }
 

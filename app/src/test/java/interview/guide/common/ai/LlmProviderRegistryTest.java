@@ -59,7 +59,7 @@ class LlmProviderRegistryTest {
         when(properties.getProviders()).thenReturn(providers);
 
         // When
-        ChatClient client = registry.getChatClient(providerId);
+        ChatClient client = registry.getChatClient(1L, providerId);
 
         // Then
         assertNotNull(client);
@@ -81,8 +81,8 @@ class LlmProviderRegistryTest {
         when(properties.getProviders()).thenReturn(providers);
 
         // When
-        ChatClient client1 = registry.getChatClient(providerId);
-        ChatClient client2 = registry.getChatClient(providerId);
+        ChatClient client1 = registry.getChatClient(1L, providerId);
+        ChatClient client2 = registry.getChatClient(1L, providerId);
 
         // Then
         assertSame(client1, client2, "Clients should be cached and returned as the same instance");
@@ -102,9 +102,9 @@ class LlmProviderRegistryTest {
 
         when(properties.getProviders()).thenReturn(providers);
 
-        ChatClient defaultClient = registry.getChatClient(providerId);
-        ChatClient plainClient = registry.getPlainChatClient(providerId);
-        ChatClient voiceClient = registry.getVoiceChatClient(providerId);
+        ChatClient defaultClient = registry.getChatClient(1L, providerId);
+        ChatClient plainClient = registry.getPlainChatClient(1L, providerId);
+        ChatClient voiceClient = registry.getVoiceChatClient(1L, providerId);
 
         assertNotNull(defaultClient);
         assertNotNull(plainClient);
@@ -121,7 +121,7 @@ class LlmProviderRegistryTest {
         when(properties.getProviders()).thenReturn(new HashMap<>());
 
         // When & Then
-        assertThrows(IllegalArgumentException.class, () -> registry.getChatClient("unknown"));
+        assertThrows(IllegalArgumentException.class, () -> registry.getChatClient(1L, "unknown"));
     }
 
     @Test
@@ -141,7 +141,7 @@ class LlmProviderRegistryTest {
         when(properties.getProviders()).thenReturn(providers);
 
         // When
-        ChatClient client = registry.getDefaultChatClient();
+        ChatClient client = registry.getChatClientOrDefault(1L, null);
 
         // Then
         assertNotNull(client);
@@ -161,10 +161,10 @@ class LlmProviderRegistryTest {
 
         when(properties.getProviders()).thenReturn(providers);
 
-        ChatClient client1 = registry.getChatClient(providerId);
+        ChatClient client1 = registry.getChatClient(1L, providerId);
         registry.reload();
         when(properties.getProviders()).thenReturn(providers);
-        ChatClient client2 = registry.getChatClient(providerId);
+        ChatClient client2 = registry.getChatClient(1L, providerId);
 
         assertNotNull(client1);
         assertNotNull(client2);
@@ -202,38 +202,38 @@ class LlmProviderRegistryTest {
         @Test
         @DisplayName("非 null providerId 委托给 getChatClient")
         void explicitProvider() {
-            ChatClient client = registry.getChatClientOrDefault("kimi");
+            ChatClient client = registry.getChatClientOrDefault(1L, "kimi");
 
             assertNotNull(client);
             // Should be cached under "kimi" key, not default
-            assertSame(client, registry.getChatClient("kimi"));
+            assertSame(client, registry.getChatClient(1L, "kimi"));
         }
 
         @Test
         @DisplayName("null providerId 回退到默认 provider")
         void nullProviderFallsBackToDefault() {
-            ChatClient client = registry.getChatClientOrDefault(null);
+            ChatClient client = registry.getChatClientOrDefault(1L, null);
 
             assertNotNull(client);
-            assertSame(client, registry.getChatClient("dashscope"));
+            assertSame(client, registry.getChatClient(1L, "dashscope"));
         }
 
         @Test
         @DisplayName("空白 providerId 回退到默认 provider")
         void blankProviderFallsBackToDefault() {
-            ChatClient client = registry.getChatClientOrDefault("   ");
+            ChatClient client = registry.getChatClientOrDefault(1L, "   ");
 
             assertNotNull(client);
-            assertSame(client, registry.getChatClient("dashscope"));
+            assertSame(client, registry.getChatClient(1L, "dashscope"));
         }
 
         @Test
         @DisplayName("default providerId 作为默认 provider 别名")
         void defaultAliasFallsBackToDefault() {
-            ChatClient client = registry.getChatClientOrDefault("default");
+            ChatClient client = registry.getChatClientOrDefault(1L, "default");
 
             assertNotNull(client);
-            assertSame(client, registry.getChatClient("dashscope"));
+            assertSame(client, registry.getChatClient(1L, "dashscope"));
         }
     }
 

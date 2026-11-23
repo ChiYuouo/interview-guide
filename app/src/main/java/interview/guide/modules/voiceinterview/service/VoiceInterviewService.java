@@ -75,6 +75,7 @@ public class VoiceInterviewService {
             ? request.getLlmProvider()
             : null;
 
+        effectiveLlmProvider = llmProviderRegistry.resolveChatProviderId(userId, effectiveLlmProvider);
         VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
                 .userId(userId)
                 .roleType(effectiveSkillId)

@@ -1,5 +1,7 @@
 package interview.guide.modules.voiceinterview.service;
 
+import static org.mockito.ArgumentMatchers.anyLong;
+
 import interview.guide.common.exception.BusinessException;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.dto.CreateSessionRequest;
@@ -118,7 +120,7 @@ class VoiceInterviewServiceTest {
                     .plannedDuration(30)
                     .build();
 
-            VoiceInterviewSessionEntity savedSession = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity savedSession = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(1L)
                     .roleType("ali-p8")
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.INTRO)
@@ -155,7 +157,7 @@ class VoiceInterviewServiceTest {
                     .plannedDuration(15)
                     .build();
 
-            VoiceInterviewSessionEntity savedSession = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity savedSession = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(2L)
                     .roleType("byteance-algo")
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH)
@@ -182,7 +184,7 @@ class VoiceInterviewServiceTest {
                     .plannedDuration(25)
                     .build();
 
-            VoiceInterviewSessionEntity savedSession = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity savedSession = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(3L)
                     .roleType("tencent-backend")
                     .customJdText("高级Java工程师，熟悉Spring Cloud")
@@ -217,7 +219,7 @@ class VoiceInterviewServiceTest {
             // Given
             Long sessionId = 1L;
             LocalDateTime startTime = LocalDateTime.now().minusMinutes(10);
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(sessionId)
                     .userId(1L)
                     .roleType("ali-p8")
@@ -263,7 +265,7 @@ class VoiceInterviewServiceTest {
         @Test
         @DisplayName("结束其他账号缓存中的会话会被拒绝")
         void testEndSession_ForeignCachedSession() {
-            when(bucket.get()).thenReturn(VoiceInterviewSessionEntity.builder().id(1L).userId(2L).build());
+            when(bucket.get()).thenReturn(VoiceInterviewSessionEntity.builder().userId(1L).id(1L).userId(2L).build());
 
             assertThrows(BusinessException.class, () -> voiceInterviewService.endSession(1L, 1L));
 
@@ -282,7 +284,7 @@ class VoiceInterviewServiceTest {
         void testResumeSession_LoadsConversationHistory() {
             // Given
             Long sessionId = 1L;
-            VoiceInterviewSessionEntity pausedSession = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity pausedSession = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(sessionId)
                     .roleType("ali-p8")
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH)
@@ -322,7 +324,7 @@ class VoiceInterviewServiceTest {
         void testResumeSession_InvalidStatus() {
             // Given
             Long sessionId = 1L;
-            VoiceInterviewSessionEntity inProgressSession = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity inProgressSession = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(sessionId)
                     .status(VoiceInterviewSessionStatus.IN_PROGRESS)
                     .build();
@@ -370,7 +372,7 @@ class VoiceInterviewServiceTest {
         void testStartPhase_IntroToTech() {
             // Given
             Long sessionId = 1L;
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(sessionId)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.INTRO)
                     .build();
@@ -391,7 +393,7 @@ class VoiceInterviewServiceTest {
         void testStartPhase_InvalidPhase() {
             // Given
             Long sessionId = 1L;
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(sessionId)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.INTRO)
                     .build();
@@ -410,7 +412,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("获取下一阶段 - INTRO -> TECH")
         void testGetNextPhase_IntroToTech() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.INTRO)
                     .techEnabled(true)
                     .build();
@@ -426,7 +428,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("获取下一阶段 - TECH -> PROJECT")
         void testGetNextPhase_TechToProject() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH)
                     .projectEnabled(true)
                     .build();
@@ -442,7 +444,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("获取下一阶段 - HR -> COMPLETED")
         void testGetNextPhase_HrToCompleted() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.HR)
                     .build();
 
@@ -457,7 +459,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("获取下一阶段 - 跳过未启用的阶段")
         void testGetNextPhase_SkipDisabledPhases() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.INTRO)
                     .techEnabled(false)
                     .projectEnabled(false)
@@ -486,7 +488,7 @@ class VoiceInterviewServiceTest {
             String userText = "我叫张三，有3年Java开发经验";
             String aiText = "你好张三，能详细介绍一下你的项目经验吗？";
 
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(sessionId)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.INTRO)
                     .build();
@@ -585,7 +587,7 @@ class VoiceInterviewServiceTest {
         void testGetSession_CacheHit() {
             // Given
             Long sessionId = 1L;
-            VoiceInterviewSessionEntity cachedSession = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity cachedSession = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(sessionId)
                     .roleType("ali-p8")
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH)
@@ -610,7 +612,7 @@ class VoiceInterviewServiceTest {
         void testGetSession_CacheMiss() {
             // Given
             Long sessionId = 1L;
-            VoiceInterviewSessionEntity dbSession = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity dbSession = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(sessionId)
                     .roleType("byteance-algo")
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.PROJECT)
@@ -647,7 +649,7 @@ class VoiceInterviewServiceTest {
         void testGetSessionDTO() {
             // Given
             Long sessionId = 1L;
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .id(sessionId)
                     .userId(1L)
                     .roleType("tencent-backend")
@@ -682,7 +684,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("判断转换 - 达到最大时长强制转换")
         void testShouldTransitionToNextPhase_MaxDuration() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH)
                     .build();
 
@@ -702,7 +704,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("判断转换 - 达到最大问题数")
         void testShouldTransitionToNextPhase_MaxQuestions() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH)
                     .build();
 
@@ -722,7 +724,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("判断转换 - 达到建议时长和最小问题数")
         void testShouldTransitionToNextPhase_SuggestedDurationWithMinQuestions() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.PROJECT)
                     .build();
 
@@ -742,7 +744,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("判断转换 - 未满足条件不转换")
         void testShouldTransitionToNextPhase_NotMet() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.HR)
                     .build();
 
@@ -762,7 +764,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("判断转换 - COMPLETED阶段不应转换")
         void testShouldTransitionToNextPhase_CompletedPhase() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.COMPLETED)
                     .build();
 
@@ -782,7 +784,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("判断转换 - null 阶段不转换")
         void testShouldTransitionToNextPhase_NullPhase() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(null)
                     .build();
 
@@ -824,7 +826,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("获取下一阶段 - null 当前阶段")
         void testGetNextPhase_NullCurrentPhase() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(null)
                     .introEnabled(true)
                     .build();
@@ -840,7 +842,7 @@ class VoiceInterviewServiceTest {
         @DisplayName("获取下一阶段 - 所有阶段禁用")
         void testGetNextPhase_AllPhasesDisabled() {
             // Given
-            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+            VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
                     .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.INTRO)
                     .introEnabled(false)
                     .techEnabled(false)

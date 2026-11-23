@@ -1,6 +1,9 @@
 package interview.guide.modules.knowledgebase.service;
 
+import interview.guide.common.config.LlmEmbeddingConfig;
 import interview.guide.common.exception.BusinessException;
+import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
+import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.modules.knowledgebase.repository.VectorRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -58,11 +61,27 @@ class KnowledgeBaseVectorServiceTest {
     @Mock
     private KnowledgeBasePersistenceService persistenceService;
 
+    @Mock
+    private LlmEmbeddingConfig embeddingConfig;
+
+    @Mock
+    private KnowledgeBaseRepository knowledgeBases;
+
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        vectorService = new KnowledgeBaseVectorService(vectorStore, vectorRepository, null,
-            new KnowledgeBaseVectorProperties(), persistenceService);
+        when(embeddingConfig.vectorStoreForUser(7L)).thenReturn(vectorStore);
+        when(knowledgeBases.findAllById(anyList())).thenAnswer(invocation -> {
+            List<Long> ids = invocation.getArgument(0);
+            return ids.stream().distinct().map(id -> {
+                var kb = new KnowledgeBaseEntity();
+                kb.setId(id);
+                kb.setUserId(7L);
+                return kb;
+            }).toList();
+        });
+        vectorService = new KnowledgeBaseVectorService(vectorRepository, null,
+            new KnowledgeBaseVectorProperties(), persistenceService, embeddingConfig, knowledgeBases);
     }
 
     // ==================== 共享辅助方法 ====================
@@ -135,7 +154,8 @@ class KnowledgeBaseVectorServiceTest {
         added.clear();
         var changed = new KnowledgeBaseVectorProperties();
         changed.setChunkSize(400);
-        new KnowledgeBaseVectorService(vectorStore, vectorRepository, null, changed, persistenceService)
+        new KnowledgeBaseVectorService(vectorRepository, null, changed, persistenceService,
+            embeddingConfig, knowledgeBases)
             .vectorizeAndStore(1L, content, null, () -> {}, source);
         assertThat(added.getFirst().getMetadata().get("source_id")).isNotEqualTo(originalSource);
     }
@@ -385,7 +405,7 @@ class KnowledgeBaseVectorServiceTest {
             when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class))).thenReturn(mockResults);
 
             // When
-            List<Document> results = vectorService.similaritySearch(query, null, topK, 0.0);
+            List<Document> results = vectorService.similaritySearch(query, List.of(1L), topK, 0.0);
 
             // Then
             assertEquals(topK, results.size(), "应该返回 topK 个结果");
@@ -477,28 +497,19 @@ class KnowledgeBaseVectorServiceTest {
             // When & Then
             RuntimeException exception = assertThrows(
                 RuntimeException.class,
-                () -> vectorService.similaritySearch(query, null, 5, 0.0)
+                () -> vectorService.similaritySearch(query, List.of(1L), 5, 0.0)
             );
 
             assertTrue(exception.getMessage().contains("向量搜索失败"));
         }
 
         @Test
-        @DisplayName("空知识库ID列表 - 不进行过滤")
+        @DisplayName("空知识库ID列表不能发起检索")
         void testSearchWithEmptyKnowledgeBaseIdList() {
-            // Given
-            String query = "查询";
-            List<Long> emptyList = List.of();
-            int topK = 5;
-
-            List<Document> mockResults = createMockDocuments(10, "1");
-            when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class))).thenReturn(mockResults);
-
-            // When
-            List<Document> results = vectorService.similaritySearch(query, emptyList, topK, 0.0);
-
-            // Then: 空列表应该返回所有结果（受 topK 限制）
-            assertEquals(topK, results.size());
+            assertThatThrownBy(() -> vectorService.similaritySearch("查询", List.of(), 5, 0.0))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("请选择知识库");
+            verifyNoInteractions(vectorStore);
         }
 
         @Test
@@ -509,7 +520,7 @@ class KnowledgeBaseVectorServiceTest {
             when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class))).thenReturn(List.of());
 
             // When
-            List<Document> results = vectorService.similaritySearch(query, null, 10, 0.0);
+            List<Document> results = vectorService.similaritySearch(query, List.of(1L), 10, 0.0);
 
             // Then
             assertTrue(results.isEmpty(), "搜索结果应该为空");
@@ -646,7 +657,7 @@ class KnowledgeBaseVectorServiceTest {
             when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class))).thenReturn(List.of());
 
             // When
-            List<Document> results = vectorService.similaritySearch(emptyQuery, null, 5, 0.0);
+            List<Document> results = vectorService.similaritySearch(emptyQuery, List.of(1L), 5, 0.0);
 
             // Then
             assertTrue(results.isEmpty());
@@ -661,7 +672,7 @@ class KnowledgeBaseVectorServiceTest {
             when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class))).thenReturn(mockResults);
 
             // When
-            List<Document> results = vectorService.similaritySearch(query, null, 0, 0.0);
+            List<Document> results = vectorService.similaritySearch(query, List.of(1L), 0, 0.0);
 
             // Then
             assertTrue(results.isEmpty(), "topK=0 应该返回空结果");
@@ -677,7 +688,7 @@ class KnowledgeBaseVectorServiceTest {
             when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class))).thenReturn(mockResults);
 
             // When
-            List<Document> results = vectorService.similaritySearch(query, null, topK, 0.0);
+            List<Document> results = vectorService.similaritySearch(query, List.of(1L), topK, 0.0);
 
             // Then
             assertEquals(5, results.size(), "应该返回所有可用结果");
@@ -689,8 +700,8 @@ class KnowledgeBaseVectorServiceTest {
     class ChunkStrategyTests {
 
         private KnowledgeBaseVectorService buildService(KnowledgeBaseVectorProperties properties) {
-            return new KnowledgeBaseVectorService(vectorStore, vectorRepository, null,
-                properties, persistenceService);
+            return new KnowledgeBaseVectorService(vectorRepository, null,
+                properties, persistenceService, embeddingConfig, knowledgeBases);
         }
 
         @Test
@@ -703,8 +714,9 @@ class KnowledgeBaseVectorServiceTest {
                 doNothing().when(freshStore).add(anyList());
                 KnowledgeBaseVectorProperties properties = new KnowledgeBaseVectorProperties();
                 properties.setChunkSize(chunkSize);
+                when(embeddingConfig.vectorStoreForUser(7L)).thenReturn(freshStore);
                 KnowledgeBaseVectorService service = new KnowledgeBaseVectorService(
-                    freshStore, vectorRepository, null, properties, persistenceService);
+                    vectorRepository, null, properties, persistenceService, embeddingConfig, knowledgeBases);
                 service.vectorizeAndStore(1L, longText);
                 @SuppressWarnings("unchecked")
                 ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);

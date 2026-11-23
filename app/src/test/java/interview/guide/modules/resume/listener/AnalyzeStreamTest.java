@@ -1,5 +1,7 @@
 package interview.guide.modules.resume.listener;
 
+import static org.mockito.ArgumentMatchers.eq;
+
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.transaction.TransactionalExecutor;
 import interview.guide.infrastructure.redis.RedisService;
@@ -66,6 +68,7 @@ class AnalyzeStreamTest {
 
   private ResumeEntity resume(String resumeText, String storageKey, String filename) {
     ResumeEntity resume = new ResumeEntity();
+        resume.setUserId(1L);
     resume.setId(5L);
     resume.setResumeText(resumeText);
     resume.setStorageKey(storageKey);
@@ -117,7 +120,7 @@ class AnalyzeStreamTest {
     void shouldAnalyzeFromDatabaseText() {
       when(resumeRepository.findById(5L))
           .thenReturn(Optional.of(resume("数据库中的简历正文", "resume/5", "a.pdf")));
-      when(gradingService.analyzeResume("数据库中的简历正文")).thenReturn(analysis());
+      when(gradingService.analyzeResume(1L, "数据库中的简历正文")).thenReturn(analysis());
       when(resumeRepository.heartbeatAnalyzeProcessing(
           org.mockito.ArgumentMatchers.eq(5L),
           org.mockito.ArgumentMatchers.eq("attempt-1"), any())).thenReturn(1);
@@ -136,7 +139,7 @@ class AnalyzeStreamTest {
       when(resumeRepository.findById(5L))
           .thenReturn(Optional.of(resume(null, "resume/5", "a.pdf")));
       when(parseService.downloadAndParseContent("resume/5", "a.pdf")).thenReturn("恢复的简历正文");
-      when(gradingService.analyzeResume("恢复的简历正文")).thenReturn(analysis());
+      when(gradingService.analyzeResume(1L, "恢复的简历正文")).thenReturn(analysis());
       when(resumeRepository.heartbeatAnalyzeProcessing(
           org.mockito.ArgumentMatchers.eq(5L),
           org.mockito.ArgumentMatchers.eq("attempt-1"), any())).thenReturn(1);
@@ -163,7 +166,7 @@ class AnalyzeStreamTest {
       assertThatThrownBy(() -> consumer.processBusiness(payload()))
           .isInstanceOf(BusinessException.class)
           .hasMessageContaining("无法获取简历文本内容");
-      verify(gradingService, never()).analyzeResume(anyString());
+      verify(gradingService, never()).analyzeResume(eq(1L), anyString());
     }
 
     @Test
@@ -173,7 +176,7 @@ class AnalyzeStreamTest {
 
       consumer.processBusiness(payload());
 
-      verify(gradingService, never()).analyzeResume(anyString());
+      verify(gradingService, never()).analyzeResume(eq(1L), anyString());
     }
 
     @Test

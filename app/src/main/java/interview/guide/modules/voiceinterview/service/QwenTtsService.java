@@ -7,12 +7,12 @@ import com.alibaba.dashscope.audio.qwen_tts_realtime.QwenTtsRealtimeConfig;
 import com.alibaba.dashscope.audio.qwen_tts_realtime.QwenTtsRealtimeParam;
 import com.google.gson.JsonObject;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
+import interview.guide.modules.llmprovider.service.LlmProviderConfigService;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.Base64;
 import java.util.concurrent.CountDownLatch;
@@ -45,66 +45,12 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 @Service
 public class QwenTtsService {
+    private final LlmProviderConfigService configs;
+    private final int connectTimeoutSeconds;
 
-    // Runtime configuration values (loaded from VoiceInterviewProperties; setters kept for tests)
-    private String model;
-
-    private String apiKey;
-
-    private String voice;
-
-    private String format;
-
-    private Integer sampleRate;
-
-    private String mode;
-
-    private String languageType;
-
-    private Float speechRate;
-
-    private Integer volume;
-
-    private int connectTimeoutSeconds;
-
-    public QwenTtsService(VoiceInterviewProperties voiceInterviewProperties) {
-        applyTtsConfig(voiceInterviewProperties);
-    }
-
-    public void reload(VoiceInterviewProperties voiceInterviewProperties) {
-        applyTtsConfig(voiceInterviewProperties);
-        log.info("QwenTtsService reloaded: model={}, voice={}, connectTimeoutSeconds={}",
-                model, voice, connectTimeoutSeconds);
-    }
-
-    private void applyTtsConfig(VoiceInterviewProperties voiceInterviewProperties) {
-        VoiceInterviewProperties.QwenTtsConfig tts = voiceInterviewProperties.getQwen().getTts();
-        this.model = tts.getModel();
-        this.apiKey = tts.getApiKey();
-        this.voice = tts.getVoice();
-        this.format = tts.getFormat();
-        this.sampleRate = tts.getSampleRate();
-        this.mode = tts.getMode();
-        this.languageType = tts.getLanguageType();
-        this.speechRate = tts.getSpeechRate();
-        this.volume = tts.getVolume();
-        this.connectTimeoutSeconds = Math.max(1, voiceInterviewProperties.getTtsConnectTimeoutSeconds());
-    }
-
-    /**
-     * Initialize the TTS service.
-     * This method is automatically called by Spring after the service is constructed
-     * and all configuration values have been loaded from VoiceInterviewProperties.
-     *
-     * @throws IllegalStateException if apiKey is not configured
-     */
-    @PostConstruct
-    public void init() {
-        if (apiKey == null || apiKey.trim().isEmpty()) {
-            throw new IllegalStateException("API key must be configured before initializing QwenTtsService");
-        }
-        log.info("QwenTtsService initialized with model: {}, voice: {}, sampleRate: {}Hz",
-                 model, voice, sampleRate);
+    public QwenTtsService(VoiceInterviewProperties properties, LlmProviderConfigService configs) {
+        this.configs = configs;
+        this.connectTimeoutSeconds = Math.max(1, properties.getTtsConnectTimeoutSeconds());
     }
 
     /**
@@ -117,16 +63,18 @@ public class QwenTtsService {
      * The method uses CountDownLatch to wait for synthesis completion with a 30-second
      * timeout to prevent indefinite blocking.
      *
+     * @param userId Owner of the voice interview
      * @param text Text to synthesize (null, empty, or whitespace-only text returns empty array)
      * @return PCM audio data at configured sample rate, or empty array if synthesis fails
      */
-    public byte[] synthesize(String text) {
+    public byte[] synthesize(Long userId, String text) {
         // Handle null, empty, or whitespace-only text
         if (text == null || text.trim().isEmpty()) {
             log.debug("Empty or null text provided, returning empty audio array");
             return new byte[0];
         }
 
+        var runtime = configs.getTtsRuntimeConfig(userId);
         log.debug("Starting TTS synthesis for text: {} characters", text.length());
 
         // Latch for synchronous waiting
@@ -144,8 +92,9 @@ public class QwenTtsService {
         try {
             // Build QwenTtsRealtimeParam with connection settings
             QwenTtsRealtimeParam param = QwenTtsRealtimeParam.builder()
-                    .model(model)
-                    .apikey(apiKey)
+                    .url(runtime.getUrl())
+                    .model(runtime.getModel())
+                    .apikey(runtime.getApiKey())
                     .build();
 
             // Create callback handler for WebSocket events
@@ -178,19 +127,19 @@ public class QwenTtsService {
 
                 // Configure session with TTS parameters
                 QwenTtsRealtimeConfig config = QwenTtsRealtimeConfig.builder()
-                        .voice(voice)
+                        .voice(runtime.getVoice())
                         .responseFormat(getAudioFormat())
-                        .mode(mode)  // "commit" mode
-                        .languageType(languageType)
-                        .speechRate(speechRate)
-                        .volume(volume)
+                        .mode(runtime.getMode())  // "commit" mode
+                        .languageType(runtime.getLanguageType())
+                        .speechRate(runtime.getSpeechRate())
+                        .volume(runtime.getVolume())
                         .build();
 
                 // Update session with configuration
                 qwenTtsRealtime.updateSession(config);
 
                 log.info("[TTS] Session configured with voice: {}, triggering synthesis for text (length: {})",
-                         voice, text.length());
+                         runtime.getVoice(), text.length());
 
                 // Send text for synthesis using commit mode
                 qwenTtsRealtime.appendText(text);
@@ -428,43 +377,5 @@ public class QwenTtsService {
         public synchronized byte[] toByteArray() {
             return baos.toByteArray();
         }
-    }
-
-    // Setter methods for configuration (used by Spring @Value injection or tests)
-
-    public void setModel(String model) {
-        this.model = model;
-    }
-
-    public void setApiKey(String apiKey) {
-        this.apiKey = apiKey;
-    }
-
-    public void setVoice(String voice) {
-        this.voice = voice;
-    }
-
-    public void setFormat(String format) {
-        this.format = format;
-    }
-
-    public void setSampleRate(Integer sampleRate) {
-        this.sampleRate = sampleRate;
-    }
-
-    public void setMode(String mode) {
-        this.mode = mode;
-    }
-
-    public void setLanguageType(String languageType) {
-        this.languageType = languageType;
-    }
-
-    public void setSpeechRate(Float speechRate) {
-        this.speechRate = speechRate;
-    }
-
-    public void setVolume(Integer volume) {
-        this.volume = volume;
     }
 }

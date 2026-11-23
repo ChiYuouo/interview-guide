@@ -66,7 +66,7 @@ public class VoiceInterviewSessionEntity {
     @Builder.Default
     private Boolean hrEnabled = true;
 
-    @Column(name = "llm_provider", length = 50)
+    @Column(name = "llm_provider", length = 64)
     @Builder.Default
     private String llmProvider = "dashscope";
 

@@ -1,5 +1,6 @@
 export const ROUTES = {
   login: '/login',
+  settings: '/settings',
   interviewSchedule: '/interview-schedule',
   interview: '/interview',
   interviewHub: '/interview-hub',

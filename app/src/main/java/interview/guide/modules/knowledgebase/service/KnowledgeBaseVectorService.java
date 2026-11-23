@@ -1,17 +1,17 @@
 package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.exception.BusinessException;
+import interview.guide.common.config.LlmEmbeddingConfig;
+import interview.guide.modules.knowledgebase.repository.KnowledgeBaseRepository;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.log.ErrorLogSanitizer;
 import interview.guide.common.transaction.TransactionalExecutor;
-import jakarta.annotation.PostConstruct;
 import interview.guide.modules.knowledgebase.repository.VectorRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.transformer.splitter.TextSplitter;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
@@ -40,22 +40,23 @@ public class KnowledgeBaseVectorService {
     private static final String METADATA_TARGET_KB_ID = "kb_target_id";
     private static final String METADATA_VECTOR_JOB_ID = "kb_vector_job_id";
     private static final String METADATA_CHUNK_STRATEGY = "chunk_strategy";
-    private final VectorStore vectorStore;
+    private final LlmEmbeddingConfig embeddingConfig;
+    private final KnowledgeBaseRepository knowledgeBases;
     private final TextSplitter textSplitter;
     private final VectorRepository vectorRepository;
     private final TransactionalExecutor transactionalExecutor;
     private final KnowledgeBaseVectorProperties vectorProperties;
     private final KnowledgeBasePersistenceService persistenceService;
 
-    @Autowired
     public KnowledgeBaseVectorService(
-        VectorStore vectorStore,
         VectorRepository vectorRepository,
         TransactionalExecutor transactionalExecutor,
         KnowledgeBaseVectorProperties vectorProperties,
-        KnowledgeBasePersistenceService persistenceService
+        KnowledgeBasePersistenceService persistenceService,
+        LlmEmbeddingConfig embeddingConfig, KnowledgeBaseRepository knowledgeBases
     ) {
-        this.vectorStore = vectorStore;
+        this.embeddingConfig = embeddingConfig;
+        this.knowledgeBases = knowledgeBases;
         this.vectorRepository = vectorRepository;
         this.transactionalExecutor = transactionalExecutor;
         this.vectorProperties = vectorProperties;
@@ -64,8 +65,14 @@ public class KnowledgeBaseVectorService {
         this.textSplitter = vectorProperties.createTextSplitter();
     }
 
-    KnowledgeBaseVectorService(VectorStore vectorStore, VectorRepository vectorRepository) {
-        this(vectorStore, vectorRepository, null, new KnowledgeBaseVectorProperties(), null);
+    public Long ownerOfKnowledgeBases(List<Long> ids) {
+        if (ids == null || ids.isEmpty())
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请选择知识库");
+        var records = knowledgeBases.findAllById(ids);
+        var owners = records.stream().map(kb -> kb.getUserId()).distinct().toList();
+        if (records.size() != ids.stream().distinct().count() || owners.size() != 1 || owners.getFirst() == null)
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在或不属于同一账号");
+        return owners.getFirst();
     }
 
     /**
@@ -98,6 +105,9 @@ public class KnowledgeBaseVectorService {
 
     public void vectorizeAndStore(Long knowledgeBaseId, String content, String attemptId,
                                   Runnable progressHeartbeat, SourceInfo source) {
+        if (knowledgeBaseId == null)
+            throw new BusinessException(ErrorCode.KNOWLEDGE_BASE_VECTORIZATION_FAILED, "向量化知识库失败：知识库不存在");
+        VectorStore ownedStore = embeddingConfig.vectorStoreForUser(ownerOfKnowledgeBases(List.of(knowledgeBaseId)));
         String jobId = null;
         try {
             if (knowledgeBaseId == null) {
@@ -144,7 +154,7 @@ public class KnowledgeBaseVectorService {
                 int end = Math.min(start + MAX_BATCH_SIZE, totalChunks);
                 List<Document> batch = chunks.subList(start, end);
                 log.debug("处理第 {}/{} 批: chunks {}-{}", i + 1, batchCount, start + 1, end);
-                vectorStore.add(batch);
+                ownedStore.add(batch);
                 // Embedding 批次心跳（调用方节流）
                 progressHeartbeat.run();
             }
@@ -183,11 +193,12 @@ public class KnowledgeBaseVectorService {
      * 基于多个知识库进行相似度搜索
      * 
      * @param query 查询文本
-     * @param knowledgeBaseIds 知识库ID列表（如果为空则搜索所有）
+     * @param knowledgeBaseIds 同一账号所属的知识库ID列表，不得为空
      * @param topK 返回top K个结果
      * @return 相关文档列表
      */
     public List<Document> similaritySearch(String query, List<Long> knowledgeBaseIds, int topK, double minScore) {
+        VectorStore ownedStore = embeddingConfig.vectorStoreForUser(ownerOfKnowledgeBases(knowledgeBaseIds));
         log.info("向量相似度搜索: queryLength={}, kbIds={}, topK={}, minScore={}",
             query.length(), knowledgeBaseIds, topK, minScore);
         
@@ -200,11 +211,9 @@ public class KnowledgeBaseVectorService {
                 builder.similarityThreshold(minScore);
             }
 
-            if (knowledgeBaseIds != null && !knowledgeBaseIds.isEmpty()) {
-                builder.filterExpression(buildKbFilterExpression(knowledgeBaseIds));
-            }
+            builder.filterExpression(buildKbFilterExpression(knowledgeBaseIds));
 
-            List<Document> results = vectorStore.similaritySearch(builder.build());
+            List<Document> results = ownedStore.similaritySearch(builder.build());
             if (results == null) {
                 return List.of();
             }
@@ -220,11 +229,11 @@ public class KnowledgeBaseVectorService {
         } catch (Exception e) {
             log.warn("向量搜索前置过滤失败，回退到本地过滤: {}",
                 ErrorLogSanitizer.summarize(e), ErrorLogSanitizer.forLogging(e));
-            return similaritySearchFallback(query, knowledgeBaseIds, topK, minScore);
+            return similaritySearchFallback(ownedStore, query, knowledgeBaseIds, topK, minScore);
         }
     }
 
-    private List<Document> similaritySearchFallback(String query, List<Long> knowledgeBaseIds, int topK, double minScore) {
+    private List<Document> similaritySearchFallback(VectorStore ownedStore, String query, List<Long> knowledgeBaseIds, int topK, double minScore) {
         try {
             // 回退检索仍保留 topK/minScore，避免兜底路径引入过多弱相关命中
             SearchRequest.Builder builder = SearchRequest.builder()
@@ -234,7 +243,8 @@ public class KnowledgeBaseVectorService {
                 builder.similarityThreshold(minScore);
             }
 
-            List<Document> allResults = vectorStore.similaritySearch(builder.build());
+            builder.filterExpression(buildKbFilterExpression(knowledgeBaseIds));
+            List<Document> allResults = ownedStore.similaritySearch(builder.build());
             if (allResults == null || allResults.isEmpty()) {
                 return List.of();
             }

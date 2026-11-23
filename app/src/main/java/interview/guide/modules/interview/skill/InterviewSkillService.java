@@ -179,14 +179,14 @@ public class InterviewSkillService {
             false, jdText, null, null);
     }
 
-    public List<CategoryDTO> parseJd(String jdText) {
+    public List<CategoryDTO> parseJd(Long userId, String jdText) {
         if (jdText == null || jdText.length() < MIN_JD_LENGTH) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "JD 内容太少（至少 " + MIN_JD_LENGTH + " 字），请补充后重试");
         }
 
         log.info("开始解析 JD，长度: {}", jdText.length());
 
-        ChatClient chatClient = llmProviderRegistry.getDefaultChatClient();
+        ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(userId, null);
         String systemPrompt = jdSystemPromptTemplate.render(Map.of(
             "referenceFileList", cachedReferenceFileList
         )) + "\n\n" + jdOutputConverter.getFormat();

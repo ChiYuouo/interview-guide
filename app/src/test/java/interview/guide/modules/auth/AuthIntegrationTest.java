@@ -1,6 +1,9 @@
 package interview.guide.modules.auth;
 
+import static org.mockito.ArgumentMatchers.eq;
+
 import interview.guide.common.ai.LlmProviderRegistry;
+import interview.guide.modules.llmprovider.service.LlmProviderConfigService;
 import interview.guide.common.config.AppConfigProperties;
 import interview.guide.common.config.CorsConfig;
 import interview.guide.common.config.CorsProperties;
@@ -583,7 +586,7 @@ class AuthIntegrationTest {
   }
 
   @Test
-  @DisplayName("普通账号可访问 RAG 会话，模型和账号管理仅限管理员")
+  @DisplayName("普通账号可访问 RAG 会话，账号管理仅限管理员")
   void restrictsNormalAccounts() throws Exception {
     createUser(csrf(login("admin")), "trial");
     var trial = csrf(login("trial"));
@@ -593,8 +596,6 @@ class AuthIntegrationTest {
         .andExpect(jsonPath("$.code").value(200))
         .andExpect(jsonPath("$.data.length()").value(0));
     verify(ragChatSessionService).listSessions(trialId);
-    mvc.perform(get("/api/llm-provider/list").session(trial.session()))
-        .andExpect(status().isForbidden());
     mvc.perform(post(USERS_PATH).session(trial.session()).header(trial.headerName(), trial.token())
             .contentType("application/json").content(accountBody("unauthorized")))
         .andExpect(status().isForbidden());
@@ -668,6 +669,11 @@ class AuthIntegrationTest {
       InterviewHistoryService.class, InterviewSessionCache.class, VoiceInterviewController.class,
       VoiceInterviewService.class, VoiceInterviewHandshakeInterceptor.class, RagChatController.class})
   static class WebConfig {
+    @Bean
+    LlmProviderConfigService llmProviderConfigService() {
+      return mock(LlmProviderConfigService.class);
+    }
+
     @Bean
     SingleConnectionDataSource dataSource() {
       var dataSource = new SingleConnectionDataSource(
@@ -910,7 +916,7 @@ class AuthIntegrationTest {
     @Bean
     InterviewQuestionService interviewQuestionService() {
       var questions = mock(InterviewQuestionService.class);
-      when(questions.generateQuestionsBySkill(any(), any(), any(), any(), anyInt(), any(), any(), any()))
+      when(questions.generateQuestionsBySkill(anyLong(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
           .thenReturn(List.of(
               InterviewQuestionDTO.create(0, "问题一", "Java", "Java"),
               InterviewQuestionDTO.create(1, "问题二", "Java", "Java"),

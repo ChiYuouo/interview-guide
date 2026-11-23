@@ -67,7 +67,7 @@ public class VoiceInterviewEvaluationService {
             List<QaRecord> qaRecords = buildQaRecords(messages);
 
             String provider = session.getLlmProvider();
-            ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(provider);
+            ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(session.getUserId(), provider);
 
             String sessionIdStr = String.valueOf(sessionId);
             String referenceContext = skillService.buildEvaluationReferenceSectionSafe(session.getSkillId());

@@ -92,7 +92,7 @@ class DashscopeLlmServiceTest {
     Generation generation = mock(Generation.class);
     when(promptService.generateSystemPromptWithContext(anyString(), isNull()))
         .thenReturn("系统提示");
-    when(llmProviderRegistry.getVoiceChatClient("dashscope")).thenReturn(chatClient);
+    when(llmProviderRegistry.getVoiceChatClient(1L, "dashscope")).thenReturn(chatClient);
     when(chatClient.prompt()).thenReturn(requestSpec);
     when(requestSpec.system(anyString())).thenReturn(requestSpec);
     when(requestSpec.user(anyString())).thenReturn(requestSpec);
@@ -102,6 +102,7 @@ class DashscopeLlmServiceTest {
     when(generation.getOutput()).thenReturn(new AssistantMessage(replyMarker));
 
     VoiceInterviewSessionEntity session = new VoiceInterviewSessionEntity();
+    session.setUserId(1L);
     String reply = service.chat(userInputMarker, session, List.of());
 
     assertThat(reply).contains(replyMarker);

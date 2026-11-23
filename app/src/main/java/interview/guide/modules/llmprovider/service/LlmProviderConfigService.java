@@ -6,6 +6,7 @@ import interview.guide.common.config.LlmProviderProperties;
 import interview.guide.common.config.LlmProviderProperties.ProviderConfig;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.modules.auth.repository.UserAccountRepository;
 import interview.guide.modules.llmprovider.dto.AsrConfigDTO;
 import interview.guide.modules.llmprovider.dto.AsrConfigRequest;
 import interview.guide.modules.llmprovider.dto.CreateProviderRequest;
@@ -20,28 +21,32 @@ import interview.guide.modules.llmprovider.model.LlmProviderEntity;
 import interview.guide.modules.llmprovider.repository.LlmGlobalSettingRepository;
 import interview.guide.modules.llmprovider.repository.LlmProviderRepository;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
-import interview.guide.modules.voiceinterview.service.QwenAsrService;
-import interview.guide.modules.voiceinterview.service.QwenTtsService;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.HttpClientSettings;
+import org.springframework.boot.http.client.HttpRedirects;
 import org.springframework.boot.http.client.InetAddressFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.ObjectMapper;
+import org.springframework.beans.BeanUtils;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
@@ -57,17 +62,18 @@ import java.util.regex.Pattern;
 @Slf4j
 public class LlmProviderConfigService {
 
+  private static final ObjectMapper VOICE_JSON = JsonMapper.builder().build();
+
   private final LlmProviderProperties properties;
   private final LlmProviderRegistry registry;
   private final LlmProviderRepository providerRepository;
   private final LlmGlobalSettingRepository globalSettingRepository;
   private final ApiKeyEncryptionService encryptionService;
+  private final UserAccountRepository accounts;
   private final String yamlPath;
   private final String envPath;
   private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
   private final VoiceInterviewProperties voiceProperties;
-  private final QwenAsrService asrService;
-  private final QwenTtsService ttsService;
 
   @Autowired
   public LlmProviderConfigService(
@@ -77,8 +83,8 @@ public class LlmProviderConfigService {
       LlmGlobalSettingRepository globalSettingRepository,
       ApiKeyEncryptionService encryptionService,
       VoiceInterviewProperties voiceProperties,
-      QwenAsrService asrService,
-      QwenTtsService ttsService) {
+      UserAccountRepository accounts) {
+    this.accounts = accounts;
     this.properties = properties;
     this.registry = registry;
     this.providerRepository = providerRepository;
@@ -87,17 +93,13 @@ public class LlmProviderConfigService {
     this.yamlPath = properties.getConfigYamlPath();
     this.envPath = properties.getConfigEnvPath();
     this.voiceProperties = voiceProperties;
-    this.asrService = asrService;
-    this.ttsService = ttsService;
+
   }
 
-  public LlmProviderConfigService(
-      LlmProviderProperties properties,
-      LlmProviderRegistry registry,
-      VoiceInterviewProperties voiceProperties,
-      QwenAsrService asrService,
-      QwenTtsService ttsService) {
-    this(properties, registry, null, null, null, voiceProperties, asrService, ttsService);
+  LlmProviderConfigService(
+      LlmProviderProperties properties, LlmProviderRegistry registry,
+      VoiceInterviewProperties voiceProperties) {
+    this(properties, registry, null, null, null, voiceProperties, null);
   }
 
   @PostConstruct
@@ -130,7 +132,9 @@ public class LlmProviderConfigService {
 
   // ===== Read operations (read lock) =====
 
-  public List<ProviderDTO> listProviders() {
+  @Transactional
+  public List<ProviderDTO> listProviders(Long userId) {
+    initializeUserProviders(userId);
     rwLock.readLock().lock();
     try {
       if (!isDatabaseBacked()) {
@@ -152,27 +156,16 @@ public class LlmProviderConfigService {
                 .build())
             .toList();
       }
-      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow();
-      return providerRepository.findAll().stream()
-          .map(provider -> ProviderDTO.builder()
-              .id(provider.getId())
-              .baseUrl(provider.getBaseUrl())
-              .maskedApiKey(maskApiKey(decryptApiKey(provider)))
-              .model(provider.getModel())
-              .embeddingModel(provider.getEmbeddingModel())
-              .embeddingDimensions(resolveEmbeddingDimensions(provider.getEmbeddingDimensions()))
-              .supportsEmbedding(provider.isSupportsEmbedding())
-              .temperature(provider.getTemperature())
-              .defaultChatProvider(provider.getId().equals(setting.getDefaultChatProviderId()))
-              .defaultEmbeddingProvider(provider.getId().equals(setting.getDefaultEmbeddingProviderId()))
-              .build())
+      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow(userId);
+      return providerRepository.findByUserIdOrderByIdAsc(userId).stream()
+          .map(provider -> toProviderDto(provider, setting))
           .toList();
     } finally {
       rwLock.readLock().unlock();
     }
   }
 
-  public ProviderDTO getProvider(String id) {
+  public ProviderDTO getProvider(Long userId, String id) {
     rwLock.readLock().lock();
     try {
       if (!isDatabaseBacked()) {
@@ -191,32 +184,23 @@ public class LlmProviderConfigService {
             .defaultEmbeddingProvider(id.equals(properties.getDefaultEmbeddingProvider()))
             .build();
       }
-      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow();
-      LlmProviderEntity provider = getProviderEntityOrThrow(id);
-      return ProviderDTO.builder()
-          .id(id)
-          .baseUrl(provider.getBaseUrl())
-          .maskedApiKey(maskApiKey(decryptApiKey(provider)))
-          .model(provider.getModel())
-          .embeddingModel(provider.getEmbeddingModel())
-          .embeddingDimensions(resolveEmbeddingDimensions(provider.getEmbeddingDimensions()))
-          .supportsEmbedding(provider.isSupportsEmbedding())
-          .temperature(provider.getTemperature())
-          .defaultChatProvider(id.equals(setting.getDefaultChatProviderId()))
-          .defaultEmbeddingProvider(id.equals(setting.getDefaultEmbeddingProviderId()))
-          .build();
+      LlmProviderEntity provider = getProviderEntityOrThrow(userId, id);
+      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow(userId);
+      return toProviderDto(provider, setting);
     } finally {
       rwLock.readLock().unlock();
     }
   }
 
-  public DefaultProviderDTO getDefaultProvider() {
+  @Transactional
+  public DefaultProviderDTO getDefaultProvider(Long userId) {
+    initializeUserProviders(userId);
     rwLock.readLock().lock();
     try {
       if (!isDatabaseBacked()) {
         return new DefaultProviderDTO(properties.getDefaultProvider(), properties.getDefaultEmbeddingProvider());
       }
-      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow();
+      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow(userId);
       return new DefaultProviderDTO(
           setting.getDefaultChatProviderId(),
           setting.getDefaultEmbeddingProviderId());
@@ -225,14 +209,16 @@ public class LlmProviderConfigService {
     }
   }
 
-  public AsrConfigDTO getAsrConfig() {
+  @Transactional
+  public AsrConfigDTO getAsrConfig(Long userId) {
+    initializeUserProviders(userId);
     rwLock.readLock().lock();
     try {
-      VoiceInterviewProperties.AsrConfig asr = voiceProperties.getQwen().getAsr();
+      VoiceInterviewProperties.AsrConfig asr = loadAsrConfig(userId, false);
       return AsrConfigDTO.builder()
           .url(asr.getUrl())
           .model(asr.getModel())
-          .maskedApiKey(maskApiKey(asr.getApiKey()))
+          .maskedApiKey(trimOrNull(asr.getApiKey()) == null ? "未配置" : "已配置")
           .language(asr.getLanguage())
           .format(asr.getFormat())
           .sampleRate(asr.getSampleRate())
@@ -246,13 +232,16 @@ public class LlmProviderConfigService {
     }
   }
 
-  public TtsConfigDTO getTtsConfig() {
+  @Transactional
+  public TtsConfigDTO getTtsConfig(Long userId) {
+    initializeUserProviders(userId);
     rwLock.readLock().lock();
     try {
-      VoiceInterviewProperties.QwenTtsConfig tts = voiceProperties.getQwen().getTts();
+      VoiceInterviewProperties.QwenTtsConfig tts = loadTtsConfig(userId, false);
       return TtsConfigDTO.builder()
+          .url(tts.getUrl())
           .model(tts.getModel())
-          .maskedApiKey(maskApiKey(tts.getApiKey()))
+          .maskedApiKey(trimOrNull(tts.getApiKey()) == null ? "未配置" : "已配置")
           .voice(tts.getVoice())
           .format(tts.getFormat())
           .sampleRate(tts.getSampleRate())
@@ -266,27 +255,33 @@ public class LlmProviderConfigService {
     }
   }
 
-  public ProviderTestResult testProvider(String id) {
+  public ProviderTestResult testProvider(Long userId, String id) {
     rwLock.readLock().lock();
     try {
       ProviderRuntimeConfig config = isDatabaseBacked()
-          ? getProviderRuntimeConfigOrThrow(id)
+          ? getProviderRuntimeConfigOrThrow(userId, id)
           : toRuntimeConfig(getLegacyProviderConfigOrThrow(id));
-      return doTestProvider(config, id);
+      return doTestProvider(config, id, userId);
     } finally {
       rwLock.readLock().unlock();
     }
   }
 
-  public ProviderTestResult testAsrConfig() {
+  public ProviderTestResult testAsrConfig(Long userId) {
     rwLock.readLock().lock();
     try {
-      VoiceInterviewProperties.AsrConfig asr = voiceProperties.getQwen().getAsr();
+      VoiceInterviewProperties.AsrConfig asr = loadAsrConfig(userId, true);
       try {
         java.net.URI wsUri = java.net.URI.create(asr.getUrl());
         String host = wsUri.getHost();
         int port = wsUri.getPort() > 0 ? wsUri.getPort() : (wsUri.getScheme().equals("wss") ? 443 : 80);
-        java.net.InetSocketAddress address = new java.net.InetSocketAddress(host, port);
+        InetAddress resolved = InetAddress.getByName(host);
+        if (!LlmGlobalSettingEntity.ADMIN_USER_ID.equals(userId) && (resolved.isAnyLocalAddress()
+            || resolved.isLoopbackAddress() || resolved.isLinkLocalAddress()
+            || resolved.isSiteLocalAddress() || resolved.isMulticastAddress())) {
+          throw new BusinessException(ErrorCode.BAD_REQUEST, "语音服务测试仅支持公网地址");
+        }
+        java.net.InetSocketAddress address = new java.net.InetSocketAddress(resolved, port);
         java.net.Socket socket = new java.net.Socket();
         socket.connect(address, 5000);
         socket.close();
@@ -310,7 +305,8 @@ public class LlmProviderConfigService {
   // ===== Write operations (write lock) =====
 
   @Transactional
-  public void createProvider(CreateProviderRequest request) {
+  public void createProvider(Long userId, CreateProviderRequest request) {
+    initializeUserProviders(userId);
     rwLock.writeLock().lock();
     try {
       if (!isDatabaseBacked()) {
@@ -318,7 +314,7 @@ public class LlmProviderConfigService {
         return;
       }
       String providerId = trimOrNull(request.id());
-      if (providerRepository.existsById(providerId)) {
+      if (providerRepository.existsByIdAndUserId(providerId, userId)) {
         throw new BusinessException(ErrorCode.PROVIDER_ALREADY_EXISTS,
             "Provider '" + request.id() + "' 已存在");
       }
@@ -335,6 +331,7 @@ public class LlmProviderConfigService {
       ApiKeyEncryptionService.EncryptedValue encrypted = encryptionService.encrypt(apiKey);
       providerRepository.save(LlmProviderEntity.builder()
           .id(providerId)
+          .userId(userId)
           .baseUrl(baseUrl)
           .apiKeyNonce(encrypted.nonce())
           .apiKeyCiphertext(encrypted.ciphertext())
@@ -346,7 +343,7 @@ public class LlmProviderConfigService {
           .enabled(true)
           .builtin(false)
           .build());
-      registry.reload();
+      registry.reload(userId);
       log.info("Created provider: id={}, baseUrl={}, model={}", providerId, baseUrl, model);
     } finally {
       rwLock.writeLock().unlock();
@@ -354,14 +351,14 @@ public class LlmProviderConfigService {
   }
 
   @Transactional
-  public void updateProvider(String id, UpdateProviderRequest request) {
+  public void updateProvider(Long userId, String id, UpdateProviderRequest request) {
     rwLock.writeLock().lock();
     try {
       if (!isDatabaseBacked()) {
         updateProviderLegacy(id, request);
         return;
       }
-      LlmProviderEntity provider = getProviderEntityOrThrow(id);
+      LlmProviderEntity provider = getProviderEntityOrThrow(userId, id);
 
       String trimmedBaseUrl = trimOrNull(request.baseUrl());
       if (request.baseUrl() != null && trimmedBaseUrl == null) {
@@ -401,7 +398,7 @@ public class LlmProviderConfigService {
       }
 
       providerRepository.save(provider);
-      registry.reload();
+      registry.reload(userId);
       log.info("Updated provider: id={}", id);
     } finally {
       rwLock.writeLock().unlock();
@@ -409,22 +406,21 @@ public class LlmProviderConfigService {
   }
 
   @Transactional
-  public void deleteProvider(String id) {
+  public void deleteProvider(Long userId, String id) {
     rwLock.writeLock().lock();
     try {
       if (!isDatabaseBacked()) {
         deleteProviderLegacy(id);
         return;
       }
-      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow();
+      getProviderEntityOrThrow(userId, id);
+      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow(userId);
       if (id.equals(setting.getDefaultChatProviderId()) || id.equals(setting.getDefaultEmbeddingProviderId())) {
         throw new BusinessException(ErrorCode.PROVIDER_DEFAULT_CANNOT_DELETE,
             "默认 Provider '" + id + "' 不可删除，请先切换默认 Provider");
       }
-      getProviderEntityOrThrow(id);
-
-      providerRepository.deleteById(id);
-      registry.reload();
+      providerRepository.deleteById(new LlmProviderEntity.Key(userId, id));
+      registry.reload(userId);
       log.info("Deleted provider: id={}", id);
     } finally {
       rwLock.writeLock().unlock();
@@ -432,7 +428,7 @@ public class LlmProviderConfigService {
   }
 
   @Transactional
-  public void updateDefaultProvider(DefaultProviderDTO request) {
+  public void updateDefaultProvider(Long userId, DefaultProviderDTO request) {
     rwLock.writeLock().lock();
     try {
       if (!isDatabaseBacked()) {
@@ -443,11 +439,11 @@ public class LlmProviderConfigService {
       if (providerId == null) {
         throw new BusinessException(ErrorCode.BAD_REQUEST, "defaultProvider 不能为空");
       }
-      getProviderEntityOrThrow(providerId);
-      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow();
+      requireApiKey(getProviderEntityOrThrow(userId, providerId));
+      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow(userId);
       setting.setDefaultChatProviderId(providerId);
       globalSettingRepository.save(setting);
-      registry.reload();
+      registry.reload(userId);
       log.info("Updated default provider: {}", providerId);
     } finally {
       rwLock.writeLock().unlock();
@@ -455,14 +451,14 @@ public class LlmProviderConfigService {
   }
 
   @Transactional
-  public void updateDefaultEmbeddingProvider(DefaultProviderDTO request) {
+  public void updateDefaultEmbeddingProvider(Long userId, DefaultProviderDTO request) {
     rwLock.writeLock().lock();
     try {
       String providerId = trimOrNull(request.defaultEmbeddingProvider());
       if (providerId == null) {
         throw new BusinessException(ErrorCode.BAD_REQUEST, "defaultEmbeddingProvider 不能为空");
       }
-      LlmProviderEntity provider = getProviderEntityOrThrow(providerId);
+      LlmProviderEntity provider = getProviderEntityOrThrow(userId, providerId);
       String embeddingModel = trimOrNull(provider.getEmbeddingModel());
       if (!provider.isSupportsEmbedding() || embeddingModel == null) {
         throw new BusinessException(ErrorCode.BAD_REQUEST,
@@ -472,75 +468,65 @@ public class LlmProviderConfigService {
           true,
           embeddingModel,
           resolveEmbeddingDimensions(provider.getEmbeddingDimensions()));
-      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow();
+      requireApiKey(provider);
+      LlmGlobalSettingEntity setting = getGlobalSettingOrThrow(userId);
       setting.setDefaultEmbeddingProviderId(providerId);
       globalSettingRepository.save(setting);
-      registry.reload();
+      registry.reload(userId);
       log.info("Updated default embedding provider: {}", providerId);
     } finally {
       rwLock.writeLock().unlock();
     }
   }
 
-  public void updateAsrConfig(AsrConfigRequest request) {
-    rwLock.writeLock().lock();
-    try {
-      VoiceInterviewProperties.AsrConfig asr = voiceProperties.getQwen().getAsr();
-      VoiceInterviewProperties.QwenTtsConfig tts = voiceProperties.getQwen().getTts();
-      if (request.url() != null) asr.setUrl(request.url());
-      if (request.model() != null) asr.setModel(request.model());
-      if (request.language() != null) asr.setLanguage(request.language());
-      if (request.format() != null) asr.setFormat(request.format());
-      if (request.sampleRate() != null) asr.setSampleRate(request.sampleRate());
-      if (request.enableTurnDetection() != null) asr.setEnableTurnDetection(request.enableTurnDetection());
-      if (request.turnDetectionType() != null) asr.setTurnDetectionType(request.turnDetectionType());
-      if (request.turnDetectionThreshold() != null) asr.setTurnDetectionThreshold(request.turnDetectionThreshold());
-      if (request.turnDetectionSilenceDurationMs() != null) asr.setTurnDetectionSilenceDurationMs(request.turnDetectionSilenceDurationMs());
-      if (request.apiKey() != null) {
-        asr.setApiKey(request.apiKey());
-        tts.setApiKey(request.apiKey());
-        updateEnvValue("AI_BAILIAN_API_KEY", request.apiKey());
-      }
-
-      writeAsrConfigToYaml(asr);
-      asrService.reload(voiceProperties);
-      if (request.apiKey() != null) {
-        ttsService.reload(voiceProperties);
-      }
-      log.info("Updated ASR config");
-    } finally {
-      rwLock.writeLock().unlock();
+  @Transactional
+  public void updateAsrConfig(Long userId, AsrConfigRequest request) {
+    initializeUserProviders(userId);
+    var setting = getGlobalSettingOrThrow(userId);
+    var config = VOICE_JSON.readValue(setting.getAsrConfigJson(),
+        VoiceInterviewProperties.AsrConfig.class);
+    config.setApiKey(null);
+    if (request.url() != null) config.setUrl(validateVoiceUrl(request.url()));
+    if (request.model() != null) config.setModel(request.model());
+    if (request.language() != null) config.setLanguage(request.language());
+    if (request.format() != null) config.setFormat(request.format());
+    if (request.sampleRate() != null) config.setSampleRate(request.sampleRate());
+    if (request.enableTurnDetection() != null) config.setEnableTurnDetection(request.enableTurnDetection());
+    if (request.turnDetectionType() != null) config.setTurnDetectionType(request.turnDetectionType());
+    if (request.turnDetectionThreshold() != null) config.setTurnDetectionThreshold(request.turnDetectionThreshold());
+    if (request.turnDetectionSilenceDurationMs() != null) config.setTurnDetectionSilenceDurationMs(request.turnDetectionSilenceDurationMs());
+    if (trimOrNull(request.apiKey()) != null) {
+      var key = encryptionService.encrypt(request.apiKey().trim());
+      setting.setAsrApiKeyNonce(key.nonce());
+      setting.setAsrApiKeyCiphertext(key.ciphertext());
     }
+    setting.setAsrConfigJson(VOICE_JSON.writeValueAsString(config));
+    globalSettingRepository.save(setting);
   }
 
-  public void updateTtsConfig(TtsConfigRequest request) {
-    rwLock.writeLock().lock();
-    try {
-      VoiceInterviewProperties.AsrConfig asr = voiceProperties.getQwen().getAsr();
-      VoiceInterviewProperties.QwenTtsConfig tts = voiceProperties.getQwen().getTts();
-      if (request.model() != null) tts.setModel(request.model());
-      if (request.voice() != null) tts.setVoice(request.voice());
-      if (request.format() != null) tts.setFormat(request.format());
-      if (request.sampleRate() != null) tts.setSampleRate(request.sampleRate());
-      if (request.mode() != null) tts.setMode(request.mode());
-      if (request.languageType() != null) tts.setLanguageType(request.languageType());
-      if (request.speechRate() != null) tts.setSpeechRate(request.speechRate());
-      if (request.volume() != null) tts.setVolume(request.volume());
-      if (request.apiKey() != null) {
-        tts.setApiKey(request.apiKey());
-        asr.setApiKey(request.apiKey());
-        updateEnvValue("AI_BAILIAN_API_KEY", request.apiKey());
-      }
-
-      writeTtsConfigToYaml(tts);
-      ttsService.reload(voiceProperties);
-      if (request.apiKey() != null) {
-        asrService.reload(voiceProperties);
-      }
-      log.info("Updated TTS config");
-    } finally {
-      rwLock.writeLock().unlock();
+  @Transactional
+  public void updateTtsConfig(Long userId, TtsConfigRequest request) {
+    initializeUserProviders(userId);
+    var setting = getGlobalSettingOrThrow(userId);
+    var config = VOICE_JSON.readValue(setting.getTtsConfigJson(),
+        VoiceInterviewProperties.QwenTtsConfig.class);
+    config.setApiKey(null);
+    if (request.url() != null) config.setUrl(validateVoiceUrl(request.url()));
+    if (request.model() != null) config.setModel(request.model());
+    if (request.voice() != null) config.setVoice(request.voice());
+    if (request.format() != null) config.setFormat(request.format());
+    if (request.sampleRate() != null) config.setSampleRate(request.sampleRate());
+    if (request.mode() != null) config.setMode(request.mode());
+    if (request.languageType() != null) config.setLanguageType(request.languageType());
+    if (request.speechRate() != null) config.setSpeechRate(request.speechRate());
+    if (request.volume() != null) config.setVolume(request.volume());
+    if (trimOrNull(request.apiKey()) != null) {
+      var key = encryptionService.encrypt(request.apiKey().trim());
+      setting.setTtsApiKeyNonce(key.nonce());
+      setting.setTtsApiKeyCiphertext(key.ciphertext());
     }
+    setting.setTtsConfigJson(VOICE_JSON.writeValueAsString(config));
+    globalSettingRepository.save(setting);
   }
 
   public void reloadProviders() {
@@ -669,20 +655,172 @@ public class LlmProviderConfigService {
     );
   }
 
-  LlmProviderEntity getProviderEntityOrThrow(String id) {
-    return providerRepository.findById(id)
+  @Transactional
+  public void initializeUserSettings(Long userId) {
+    initializeUserProviders(userId);
+  }
+
+  private void initializeUserProviders(Long userId) {
+    if (!isDatabaseBacked() || accounts == null) return;
+    accounts.findByIdForUpdate(userId).orElseThrow(() ->
+        new BusinessException(ErrorCode.UNAUTHORIZED, "请先登录"));
+    var setting = globalSettingRepository.findById(userId)
+        .orElseGet(() -> LlmGlobalSettingEntity.builder().id(userId).build());
+    initializeVoiceSettings(setting, userId);
+    if (setting.isPresetsInitialized()) { globalSettingRepository.save(setting); return; }
+    var existing = new HashSet<String>();
+    providerRepository.findByUserIdOrderByIdAsc(userId).forEach(p -> existing.add(p.getId()));
+    var presets = new ArrayList<LlmProviderEntity>();
+    if (properties.getProviders() != null) {
+      properties.getProviders().forEach((id, config) -> {
+        if (!existing.contains(id) && config != null && trimOrNull(config.getBaseUrl()) != null
+            && trimOrNull(config.getModel()) != null) {
+          presets.add(LlmProviderEntity.builder().userId(userId).id(id)
+              .baseUrl(config.getBaseUrl()).model(config.getModel())
+              .temperature(config.getTemperature()).embeddingModel(config.getEmbeddingModel())
+              .embeddingDimensions(config.getEmbeddingDimensions())
+              .supportsEmbedding(Boolean.TRUE.equals(config.getSupportsEmbedding()) || trimOrNull(config.getEmbeddingModel()) != null)
+              .enabled(true).builtin(true).build());
+        }
+      });
+    }
+    providerRepository.saveAll(presets);
+    setting.setPresetsInitialized(true);
+    globalSettingRepository.save(setting);
+  }
+
+  private void initializeVoiceSettings(LlmGlobalSettingEntity setting, Long userId) {
+    boolean admin = LlmGlobalSettingEntity.ADMIN_USER_ID.equals(userId);
+    if (setting.getAsrConfigJson() == null) {
+      var defaults = new VoiceInterviewProperties.AsrConfig();
+      BeanUtils.copyProperties(voiceProperties.getQwen().getAsr(), defaults);
+      String key = defaults.getApiKey();
+      defaults.setApiKey(null);
+      setting.setAsrConfigJson(VOICE_JSON.writeValueAsString(defaults));
+      if (admin && trimOrNull(key) != null) {
+        var encrypted = encryptionService.encrypt(key);
+        setting.setAsrApiKeyNonce(encrypted.nonce());
+        setting.setAsrApiKeyCiphertext(encrypted.ciphertext());
+      }
+    }
+    if (setting.getTtsConfigJson() == null) {
+      var defaults = new VoiceInterviewProperties.QwenTtsConfig();
+      BeanUtils.copyProperties(voiceProperties.getQwen().getTts(), defaults);
+      String key = defaults.getApiKey();
+      defaults.setApiKey(null);
+      setting.setTtsConfigJson(VOICE_JSON.writeValueAsString(defaults));
+      if (admin && trimOrNull(key) != null) {
+        var encrypted = encryptionService.encrypt(key);
+        setting.setTtsApiKeyNonce(encrypted.nonce());
+        setting.setTtsApiKeyCiphertext(encrypted.ciphertext());
+      }
+    }
+  }
+
+  public VoiceInterviewProperties.AsrConfig getAsrRuntimeConfig(Long userId) {
+    return loadAsrConfig(userId, true);
+  }
+
+  public VoiceInterviewProperties.QwenTtsConfig getTtsRuntimeConfig(Long userId) {
+    return loadTtsConfig(userId, true);
+  }
+
+  public LocalDateTime getVoiceSettingsUpdatedAt(Long userId) {
+    return getGlobalSettingOrThrow(userId).getUpdatedAt();
+  }
+
+  public void requireChatConfigured(Long userId, String provider) {
+    registry.resolveChatProviderId(userId, provider);
+  }
+
+  public void requireVoiceConfigured(Long userId) {
+    loadAsrConfig(userId, true);
+    loadTtsConfig(userId, true);
+  }
+
+  private VoiceInterviewProperties.AsrConfig loadAsrConfig(Long userId, boolean requireKey) {
+    var setting = globalSettingRepository.findById(userId).orElseThrow(() ->
+        new BusinessException(ErrorCode.BAD_REQUEST, "请先配置语音服务和 API Key"));
+    var config = setting.getAsrConfigJson() == null ? new VoiceInterviewProperties.AsrConfig()
+        : VOICE_JSON.readValue(setting.getAsrConfigJson(), VoiceInterviewProperties.AsrConfig.class);
+    config.setApiKey(decryptVoiceKey(setting.getAsrApiKeyNonce(), setting.getAsrApiKeyCiphertext()));
+    if (requireKey && trimOrNull(config.getApiKey()) == null)
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "请先配置语音识别模型和 API Key");
+    return config;
+  }
+
+  private VoiceInterviewProperties.QwenTtsConfig loadTtsConfig(Long userId, boolean requireKey) {
+    var setting = globalSettingRepository.findById(userId).orElseThrow(() ->
+        new BusinessException(ErrorCode.BAD_REQUEST, "请先配置语音服务和 API Key"));
+    var config = setting.getTtsConfigJson() == null ? new VoiceInterviewProperties.QwenTtsConfig()
+        : VOICE_JSON.readValue(setting.getTtsConfigJson(), VoiceInterviewProperties.QwenTtsConfig.class);
+    config.setApiKey(decryptVoiceKey(setting.getTtsApiKeyNonce(), setting.getTtsApiKeyCiphertext()));
+    if (requireKey && trimOrNull(config.getApiKey()) == null)
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "请先配置语音合成模型和 API Key");
+    return config;
+  }
+
+  private String decryptVoiceKey(String nonce, String ciphertext) {
+    return ciphertext == null ? null : encryptionService.decrypt(nonce, ciphertext);
+  }
+
+  private String validateVoiceUrl(String value) {
+    try {
+      URI uri = URI.create(value.trim());
+      if (!("wss".equalsIgnoreCase(uri.getScheme()) || "ws".equalsIgnoreCase(uri.getScheme()))
+          || uri.getHost() == null || uri.getUserInfo() != null
+          || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+        throw new IllegalArgumentException();
+      }
+      return uri.toString();
+    } catch (IllegalArgumentException e) {
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "请填写有效的 WS/WSS 语音服务地址");
+    }
+  }
+
+  private ProviderDTO toProviderDto(LlmProviderEntity provider, LlmGlobalSettingEntity setting) {
+    boolean keyConfigured = hasApiKey(provider);
+    String id = provider.getId();
+    return ProviderDTO.builder()
+        .id(id)
+        .baseUrl(provider.getBaseUrl())
+        .maskedApiKey(keyConfigured ? "已配置" : "未配置")
+        .apiKeyConfigured(keyConfigured)
+        .model(provider.getModel())
+        .embeddingModel(provider.getEmbeddingModel())
+        .embeddingDimensions(resolveEmbeddingDimensions(provider.getEmbeddingDimensions()))
+        .supportsEmbedding(provider.isSupportsEmbedding())
+        .temperature(provider.getTemperature())
+        .defaultChatProvider(id.equals(setting.getDefaultChatProviderId()))
+        .defaultEmbeddingProvider(id.equals(setting.getDefaultEmbeddingProviderId()))
+        .build();
+  }
+
+  private boolean hasApiKey(LlmProviderEntity provider) {
+    return trimOrNull(decryptApiKey(provider)) != null;
+  }
+
+  private void requireApiKey(LlmProviderEntity provider) {
+    if (!hasApiKey(provider)) {
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "请先配置模型和 API Key");
+    }
+  }
+
+  private LlmProviderEntity getProviderEntityOrThrow(Long userId, String id) {
+    return providerRepository.findByIdAndUserId(id, userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.PROVIDER_NOT_FOUND,
             "Provider '" + id + "' 不存在"));
   }
 
-  private LlmGlobalSettingEntity getGlobalSettingOrThrow() {
-    return globalSettingRepository.findById(LlmGlobalSettingEntity.SINGLETON_ID)
+  private LlmGlobalSettingEntity getGlobalSettingOrThrow(Long userId) {
+    return globalSettingRepository.findById(userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.PROVIDER_CONFIG_READ_FAILED,
             "默认 Provider 配置未初始化"));
   }
 
-  private ProviderRuntimeConfig getProviderRuntimeConfigOrThrow(String id) {
-    LlmProviderEntity provider = getProviderEntityOrThrow(id);
+  private ProviderRuntimeConfig getProviderRuntimeConfigOrThrow(Long userId, String id) {
+    LlmProviderEntity provider = getProviderEntityOrThrow(userId, id);
+    requireApiKey(provider);
     return new ProviderRuntimeConfig(
         provider.getBaseUrl(),
         decryptApiKey(provider),
@@ -695,6 +833,7 @@ public class LlmProviderConfigService {
   }
 
   private String decryptApiKey(LlmProviderEntity provider) {
+    if (provider.getApiKeyCiphertext() == null || provider.getApiKeyCiphertext().isBlank()) return "";
     return encryptionService.decrypt(provider.getApiKeyNonce(), provider.getApiKeyCiphertext());
   }
 
@@ -786,15 +925,18 @@ public class LlmProviderConfigService {
 
   // ===== Provider test logic (called under read lock) =====
 
-  private ProviderTestResult doTestProvider(ProviderRuntimeConfig config, String id) {
+  private ProviderTestResult doTestProvider(ProviderRuntimeConfig config, String id, Long userId) {
     try {
+      InetAddressFilter addressFilter = InetAddressFilter.externalAddresses();
+      if (LlmGlobalSettingEntity.ADMIN_USER_ID.equals(userId)) {
+        addressFilter = addressFilter.or(InetAddressFilter.adapt(InetAddress::isLoopbackAddress))
+            .or("198.18.0.0/15");
+      }
       HttpClientSettings settings = HttpClientSettings.defaults()
           .withConnectTimeout(Duration.ofSeconds(5))
           .withReadTimeout(Duration.ofSeconds(10))
-          .withInetAddressFilter(
-              InetAddressFilter.externalAddresses()
-                  .or(InetAddressFilter.adapt(InetAddress::isLoopbackAddress))
-                  .or("198.18.0.0/15"));
+          .withRedirects(HttpRedirects.DONT_FOLLOW)
+          .withInetAddressFilter(addressFilter);
 
       RestClient restClient = RestClient.builder()
           .defaultHeader("Authorization", "Bearer " + config.apiKey())
@@ -903,39 +1045,6 @@ public class LlmProviderConfigService {
     mutateYamlText(ErrorCode.PROVIDER_CONFIG_WRITE_FAILED, "写入默认 Provider 配置失败", editor -> {
       editor.setScalar(new String[]{"app", "ai", "default-provider"}, defaultProvider);
       editor.removeSection(new String[]{"app", "ai"}, "module-defaults");
-    });
-  }
-
-  private void writeAsrConfigToYaml(VoiceInterviewProperties.AsrConfig asr) {
-    mutateYamlText(ErrorCode.VOICE_CONFIG_WRITE_FAILED, "写入 ASR 配置失败", editor -> {
-      LinkedHashMap<String, Object> values = new LinkedHashMap<>();
-      values.put("url", asr.getUrl());
-      values.put("model", asr.getModel());
-      values.put("api-key", "${AI_BAILIAN_API_KEY}");
-      values.put("language", asr.getLanguage());
-      values.put("format", asr.getFormat());
-      values.put("sample-rate", asr.getSampleRate());
-      values.put("enable-turn-detection", asr.isEnableTurnDetection());
-      values.put("turn-detection-type", asr.getTurnDetectionType());
-      values.put("turn-detection-threshold", asr.getTurnDetectionThreshold());
-      values.put("turn-detection-silence-duration-ms", asr.getTurnDetectionSilenceDurationMs());
-      editor.setBlock(new String[]{"app", "voice-interview", "qwen"}, "asr", values);
-    });
-  }
-
-  private void writeTtsConfigToYaml(VoiceInterviewProperties.QwenTtsConfig tts) {
-    mutateYamlText(ErrorCode.VOICE_CONFIG_WRITE_FAILED, "写入 TTS 配置失败", editor -> {
-      LinkedHashMap<String, Object> values = new LinkedHashMap<>();
-      values.put("model", tts.getModel());
-      values.put("api-key", "${AI_BAILIAN_API_KEY}");
-      values.put("voice", tts.getVoice());
-      values.put("format", tts.getFormat());
-      values.put("sample-rate", tts.getSampleRate());
-      values.put("mode", tts.getMode());
-      values.put("language-type", tts.getLanguageType());
-      values.put("speech-rate", tts.getSpeechRate());
-      values.put("volume", tts.getVolume());
-      editor.setBlock(new String[]{"app", "voice-interview", "qwen"}, "tts", values);
     });
   }
 

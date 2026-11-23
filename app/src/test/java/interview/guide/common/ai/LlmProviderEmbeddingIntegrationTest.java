@@ -60,7 +60,7 @@ class LlmProviderEmbeddingIntegrationTest {
   @ValueSource(strings = {"qwen3-embedding-0.6b", "Qwen/Qwen3-Embedding-8B", "glm-vector-deployment"})
   @DisplayName("同系列名称及自定义别名实际请求向量端点并返回向量")
   void embedWithSharedFamilyName(String model) {
-    float[] vector = registry(model, true).getEmbeddingModel("probe").embed("测试文本");
+    float[] vector = registry(model, true).getEmbeddingModel(1L, "probe").embed("测试文本");
 
     assertThat(vector).containsExactly(0.1f, 0.2f, 0.3f);
     assertThat(paths).containsExactly("/v1/embeddings");
@@ -72,7 +72,7 @@ class LlmProviderEmbeddingIntegrationTest {
   void rejectModelWithoutEmbeddingCapability() {
     responseStatus = 400;
     assertThatThrownBy(() -> registry("qwen-chat-deployment", true)
-        .getEmbeddingModel("probe").embed("测试文本"))
+        .getEmbeddingModel(1L, "probe").embed("测试文本"))
         .hasMessageContaining("model does not support embeddings");
     assertThat(paths).containsExactly("/v1/embeddings");
   }
@@ -80,7 +80,7 @@ class LlmProviderEmbeddingIntegrationTest {
   @Test
   @DisplayName("未配置向量模型仍在调用前失败")
   void rejectMissingModel() {
-    assertThatThrownBy(() -> registry(" ", true).getEmbeddingModel("probe"))
+    assertThatThrownBy(() -> registry(" ", true).getEmbeddingModel(1L, "probe"))
         .isInstanceOf(BusinessException.class).hasMessageContaining("未配置可用的 Embedding 模型");
     assertThat(paths).isEmpty();
   }
@@ -88,7 +88,7 @@ class LlmProviderEmbeddingIntegrationTest {
   @Test
   @DisplayName("未启用向量能力仍在调用前失败")
   void rejectDisabledCapability() {
-    assertThatThrownBy(() -> registry(null, false).getEmbeddingModel("probe"))
+    assertThatThrownBy(() -> registry(null, false).getEmbeddingModel(1L, "probe"))
         .isInstanceOf(BusinessException.class).hasMessageContaining("未配置可用的 Embedding 模型");
     assertThat(paths).isEmpty();
   }

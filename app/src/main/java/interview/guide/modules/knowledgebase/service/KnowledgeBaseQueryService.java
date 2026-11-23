@@ -9,7 +9,6 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.knowledgebase.model.QueryRequest;
 import interview.guide.modules.knowledgebase.model.QueryResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -95,10 +94,6 @@ public class KnowledgeBaseQueryService {
         this.minScoreDefault = queryProperties.getSearch().getMinScoreDefault();
     }
 
-    private ChatClient getChatClient() {
-        return llmProviderRegistry.getPlainChatClient();
-    }
-
     /**
      * 基于单个知识库回答用户问题
      *
@@ -128,12 +123,16 @@ public class KnowledgeBaseQueryService {
             return NO_RESULT_RESPONSE;
         }
 
+        Long userId = vectorService.ownerOfKnowledgeBases(knowledgeBaseIds);
+        llmProviderRegistry.resolveChatProviderId(userId, null);
+        llmProviderRegistry.getDefaultEmbeddingModel(userId);
+
         QueryContext queryContext = null;
         long retrievalNanos = 0;
         try {
             countService.updateQuestionCounts(knowledgeBaseIds);
 
-            queryContext = buildQueryContext(question, List.of());
+            queryContext = buildQueryContext(userId, question, List.of());
             long retrievalStart = System.nanoTime();
             List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
             retrievalNanos = System.nanoTime() - retrievalStart;
@@ -153,7 +152,7 @@ public class KnowledgeBaseQueryService {
             String userPrompt = buildUserPrompt(context, question);
 
             long generationStart = System.nanoTime();
-            String answer = getChatClient().prompt()
+            String answer = llmProviderRegistry.getPlainChatClient(userId, null).prompt()
                     .system(systemPrompt)
                     .user(userPrompt)
                     .call()
@@ -276,6 +275,10 @@ public class KnowledgeBaseQueryService {
             return Flux.just(NO_RESULT_RESPONSE);
         }
 
+        Long userId = vectorService.ownerOfKnowledgeBases(knowledgeBaseIds);
+        llmProviderRegistry.resolveChatProviderId(userId, null);
+        llmProviderRegistry.getDefaultEmbeddingModel(userId);
+
         try {
             // 1. 验证知识库是否存在并更新问题计数
             countService.updateQuestionCounts(knowledgeBaseIds);
@@ -283,7 +286,7 @@ public class KnowledgeBaseQueryService {
             // 2. Query rewrite + 动态参数检索
             long rewriteStart = System.nanoTime();
             List<Message> effectiveHistory = sanitizeHistory(history);
-            QueryContext queryContext = buildQueryContext(question, effectiveHistory);
+            QueryContext queryContext = buildQueryContext(userId, question, effectiveHistory);
             List<String> attemptedQueries = new ArrayList<>();
             List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds, attemptedQueries);
             long rewriteAndRetrievalMs = (System.nanoTime() - rewriteStart) / 1_000_000;
@@ -310,7 +313,7 @@ public class KnowledgeBaseQueryService {
             String userPrompt = buildUserPrompt(context, question);
 
             // 5. 流式调用（带历史上下文）+ 探测窗口归一化
-            var promptSpec = getChatClient().prompt().system(systemPrompt);
+            var promptSpec = llmProviderRegistry.getPlainChatClient(userId, null).prompt().system(systemPrompt);
             if (!effectiveHistory.isEmpty()) {
                 promptSpec = promptSpec.messages(effectiveHistory);
             }
@@ -446,7 +449,8 @@ public class KnowledgeBaseQueryService {
         }
         long start = System.nanoTime();
         List<Message> effectiveHistory = sanitizeHistory(history);
-        QueryContext queryContext = buildQueryContext(question, effectiveHistory);
+        Long userId = vectorService.ownerOfKnowledgeBases(knowledgeBaseIds);
+        QueryContext queryContext = buildQueryContext(userId, question, effectiveHistory);
         List<String> attemptedQueries = new ArrayList<>();
         List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds, attemptedQueries);
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
@@ -472,10 +476,10 @@ public class KnowledgeBaseQueryService {
             hit ? "RETRIEVED" : "NO_RESULT");
     }
 
-    private QueryContext buildQueryContext(String originalQuestion, List<Message> history) {
+    private QueryContext buildQueryContext(Long userId, String originalQuestion, List<Message> history) {
         String normalizedQuestion = normalizeQuestion(originalQuestion);
         long rewriteStart = System.nanoTime();
-        String rewrittenQuestion = rewriteQuestion(normalizedQuestion, history);
+        String rewrittenQuestion = rewriteQuestion(userId, normalizedQuestion, history);
         long rewriteDurationMs = (System.nanoTime() - rewriteStart) / 1_000_000;
         Set<String> candidates = new LinkedHashSet<>();
         candidates.add(rewrittenQuestion);
@@ -620,7 +624,7 @@ public class KnowledgeBaseQueryService {
     }
 
 //    改写
-    private String rewriteQuestion(String question, List<Message> history) {
+    private String rewriteQuestion(Long userId, String question, List<Message> history) {
         if (!rewriteEnabled) {
             ragMetrics.recordRewriteFallback("disabled");
             return question;
@@ -634,7 +638,7 @@ public class KnowledgeBaseQueryService {
             variables.put("question", question);
             variables.put("history", formatHistoryForRewrite(history));
             String rewritePrompt = rewritePromptTemplate.render(variables);
-            String rewritten = getChatClient().prompt()
+            String rewritten = llmProviderRegistry.getPlainChatClient(userId, null).prompt()
                 .user(rewritePrompt)
                 .call()
                 .content();

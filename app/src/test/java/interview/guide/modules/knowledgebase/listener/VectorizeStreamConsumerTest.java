@@ -55,6 +55,7 @@ class VectorizeStreamConsumerTest {
 
   private KnowledgeBaseEntity kb(String storageKey, String filename) {
     KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+        kb.setUserId(1L);
     kb.setId(7L);
     kb.setStorageKey(storageKey);
     kb.setOriginalFilename(filename);

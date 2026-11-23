@@ -57,9 +57,9 @@ class VoiceContextCompressorTest {
     @DisplayName("真实摘要模板注入旧摘要和新增轮次，不把占位符原文发送给模型")
     void summaryPromptContainsActualHistory() {
         ChatClient client = mock(ChatClient.class, RETURNS_DEEP_STUBS);
-        when(llmProviderRegistry.getPlainChatClient()).thenReturn(client);
+        when(llmProviderRegistry.getPlainChatClient(1L, null)).thenReturn(client);
         when(client.prompt().user(anyString()).call().content()).thenReturn("合并后的摘要");
-        var result = compressor.compress(turns(35), "旧摘要中的项目事实", 0);
+        var result = compressor.compress(1L, turns(35), "旧摘要中的项目事实", 0);
         var captor = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(client.prompt(), atLeastOnce()).user(captor.capture());
         assertThat(captor.getAllValues()).anySatisfy(prompt -> assertThat(prompt)
@@ -86,12 +86,12 @@ class VoiceContextCompressorTest {
             properties.getContextCompression().setEnabled(false);
             List<VoiceInterviewMessageEntity> all = turns(30);
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             assertNull(r.summary());
             assertFalse(r.changed());
             assertEquals(30, r.recent().size());
-            verify(llmProviderRegistry, never()).getPlainChatClient();
+            verify(llmProviderRegistry, never()).getPlainChatClient(1L, null);
         }
 
         @Test
@@ -102,12 +102,12 @@ class VoiceContextCompressorTest {
             properties.getContextCompression().setWindowSize(20);
             List<VoiceInterviewMessageEntity> all = turns(30);
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             assertNull(r.summary());
             assertFalse(r.changed());
             assertEquals(20, r.recent().size());
-            verify(llmProviderRegistry, never()).getPlainChatClient();
+            verify(llmProviderRegistry, never()).getPlainChatClient(1L, null);
         }
 
         @Test
@@ -121,13 +121,13 @@ class VoiceContextCompressorTest {
             List<VoiceInterviewMessageEntity> all = turns(35);
             ChatClient chatClient = mockChatClient("合并后的摘要");
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             assertEquals("合并后的摘要", r.summary());
             assertTrue(r.changed());
             assertEquals(15, r.coveredTurns());
             assertEquals(20, r.recent().size());
-            verify(llmProviderRegistry, times(1)).getPlainChatClient();
+            verify(llmProviderRegistry, times(1)).getPlainChatClient(1L, null);
         }
 
         @Test
@@ -141,11 +141,11 @@ class VoiceContextCompressorTest {
             ChatClient chatClient = mockChatClient("glm", "合并后的摘要");
 
             VoiceContextCompressor.CompressedHistory result =
-                compressor.compress(all, null, 0, "glm");
+                compressor.compress(1L, all, null, 0, "glm");
 
             assertEquals("合并后的摘要", result.summary());
-            verify(llmProviderRegistry).getPlainChatClient("glm");
-            verify(llmProviderRegistry, never()).getPlainChatClient();
+            verify(llmProviderRegistry).getPlainChatClient(1L, "glm");
+            verify(llmProviderRegistry, never()).getPlainChatClient(1L, null);
         }
     }
 
@@ -156,7 +156,7 @@ class VoiceContextCompressorTest {
         @Test
         @DisplayName("空输入：返回空，不报错")
         void emptyInput() {
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(List.of(), null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, List.of(), null, 0);
             assertNull(r.summary());
             assertFalse(r.changed());
             assertTrue(r.recent().isEmpty());
@@ -170,7 +170,7 @@ class VoiceContextCompressorTest {
             properties.getContextCompression().setWindowSize(20);
             List<VoiceInterviewMessageEntity> all = turns(15);
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             assertNull(r.summary());
             assertFalse(r.changed());
@@ -187,13 +187,13 @@ class VoiceContextCompressorTest {
             // total=25 → earlyCount=5 < 10 → 不触发
             List<VoiceInterviewMessageEntity> all = turns(25);
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, "已有摘要", 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, "已有摘要", 0);
 
             assertEquals("已有摘要", r.summary());
             assertFalse(r.changed());
             assertEquals(25, r.recent().size());
             assertEquals(1, r.recent().getFirst().getSequenceNum());
-            verify(llmProviderRegistry, never()).getPlainChatClient();
+            verify(llmProviderRegistry, never()).getPlainChatClient(1L, null);
         }
 
         @Test
@@ -206,13 +206,13 @@ class VoiceContextCompressorTest {
             // total=35 → earlyCount=15，但传入脏数据 coveredTurns=20（> earlyCount）
             List<VoiceInterviewMessageEntity> all = turns(35);
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, "已有摘要", 20);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, "已有摘要", 20);
 
             // earlyCount > coveredTurns 前置条件拦住，subList 不会收到 from > to，不会抛 IllegalArgumentException
             assertEquals("已有摘要", r.summary());
             assertFalse(r.changed());
             assertEquals(20, r.recent().size());
-            verify(llmProviderRegistry, never()).getPlainChatClient();
+            verify(llmProviderRegistry, never()).getPlainChatClient(1L, null);
         }
     }
 
@@ -235,9 +235,9 @@ class VoiceContextCompressorTest {
             when(spec.user(anyString())).thenReturn(spec);
             when(spec.call()).thenReturn(callSpec);
             when(callSpec.content()).thenThrow(new RuntimeException("llm down"));
-            when(llmProviderRegistry.getPlainChatClient()).thenReturn(chatClient);
+            when(llmProviderRegistry.getPlainChatClient(1L, null)).thenReturn(chatClient);
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, "已有摘要", 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, "已有摘要", 0);
 
             // 失败降级：保留旧摘要 + 最近窗口，不允许恢复为全量历史
             assertEquals("已有摘要", r.summary());
@@ -261,9 +261,9 @@ class VoiceContextCompressorTest {
             when(spec.user(anyString())).thenReturn(spec);
             when(spec.call()).thenReturn(callSpec);
             when(callSpec.content()).thenThrow(new RuntimeException("llm down"));
-            when(llmProviderRegistry.getPlainChatClient()).thenReturn(chatClient);
+            when(llmProviderRegistry.getPlainChatClient(1L, null)).thenReturn(chatClient);
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             assertNull(r.summary());
             assertFalse(r.changed());
@@ -324,7 +324,7 @@ class VoiceContextCompressorTest {
                 all.add(turn(i, "短问题" + i, "短回答" + i));
             }
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             assertTrue(formattedChars(r.summary(), r.recent()) <= 500);
             // 始终保留最近消息
@@ -350,7 +350,7 @@ class VoiceContextCompressorTest {
             List<VoiceInterviewMessageEntity> all = turns(35);
             mockChatClient("摘要".repeat(100));
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             assertEquals("摘要".repeat(100), r.summary());
             assertTrue(formattedChars(r.summary(), r.recent()) <= 5000);
@@ -373,7 +373,7 @@ class VoiceContextCompressorTest {
             String summary = "摘".repeat(3900);
             mockChatClient(summary);
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             // 摘要未超 maxSummaryChars，不应被截断
             assertEquals(summary, r.summary());
@@ -390,7 +390,7 @@ class VoiceContextCompressorTest {
             List<VoiceInterviewMessageEntity> all = turns(35);
             mockChatClient("摘".repeat(300));
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             assertThatSummaryTruncated(r.summary());
         }
@@ -413,9 +413,9 @@ class VoiceContextCompressorTest {
                 all.add(turn(i, "问".repeat(100), "答".repeat(100)));
             }
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
-            verify(llmProviderRegistry, never()).getPlainChatClient();
+            verify(llmProviderRegistry, never()).getPlainChatClient(1L, null);
             assertTrue(formattedChars(null, r.recent()) <= 1000);
             assertEquals(30, r.recent().getLast().getSequenceNum());
         }
@@ -431,9 +431,9 @@ class VoiceContextCompressorTest {
                 all.add(turn(i, "问".repeat(100), "答".repeat(100)));
             }
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
-            verify(llmProviderRegistry, never()).getPlainChatClient();
+            verify(llmProviderRegistry, never()).getPlainChatClient(1L, null);
             assertNull(r.summary());
             assertTrue(r.recent().size() < 30);
             assertTrue(formattedChars(null, r.recent()) <= 1000);
@@ -452,7 +452,7 @@ class VoiceContextCompressorTest {
                 turn(2, "短问题", "短回答"),
                 turn(3, "超".repeat(500), "长".repeat(500)));
 
-            VoiceContextCompressor.CompressedHistory r = compressor.compress(all, null, 0);
+            VoiceContextCompressor.CompressedHistory r = compressor.compress(1L, all, null, 0);
 
             // 保留最近消息身份（sequenceNum=3），且总字符仍受硬预算约束
             assertFalse(r.recent().isEmpty());
@@ -471,9 +471,9 @@ class VoiceContextCompressorTest {
             List<VoiceInterviewMessageEntity> all = turns(35);
 
             VoiceContextCompressor.CompressedHistory r =
-                compressor.compress(all, "已有摘要", 15);
+                compressor.compress(1L, all, "已有摘要", 15);
 
-            verify(llmProviderRegistry, never()).getPlainChatClient();
+            verify(llmProviderRegistry, never()).getPlainChatClient(1L, null);
             assertEquals("已有摘要", r.summary());
             assertFalse(r.changed());
             assertEquals(20, r.recent().size());
@@ -514,7 +514,7 @@ class VoiceContextCompressorTest {
         when(spec.user(anyString())).thenReturn(spec);
         when(spec.call()).thenReturn(callSpec);
         when(callSpec.content()).thenReturn(content);
-        when(llmProviderRegistry.getPlainChatClient()).thenReturn(chatClient);
+        when(llmProviderRegistry.getPlainChatClient(1L, null)).thenReturn(chatClient);
         return chatClient;
     }
 
@@ -526,7 +526,7 @@ class VoiceContextCompressorTest {
         when(spec.user(anyString())).thenReturn(spec);
         when(spec.call()).thenReturn(callSpec);
         when(callSpec.content()).thenReturn(content);
-        when(llmProviderRegistry.getPlainChatClient(provider)).thenReturn(chatClient);
+        when(llmProviderRegistry.getPlainChatClient(1L, provider)).thenReturn(chatClient);
         return chatClient;
     }
 }

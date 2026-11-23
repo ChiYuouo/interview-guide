@@ -1,5 +1,7 @@
 package interview.guide.modules.voiceinterview.controller;
 
+import interview.guide.modules.llmprovider.service.LlmProviderConfigService;
+
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.result.Result;
 import interview.guide.modules.auth.model.AccountPrincipal;
@@ -27,6 +29,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 @DisplayName("语音评估接口")
 class VoiceInterviewControllerEvaluationTest {
+  @Mock private LlmProviderConfigService configService;
+
 
     private final AccountPrincipal account = createAccount();
 
@@ -46,7 +50,7 @@ class VoiceInterviewControllerEvaluationTest {
     @DisplayName("查询评估状态时应返回状态更新时间")
     void shouldExposeEvaluationStatusUpdatedAt() throws ReflectiveOperationException {
         LocalDateTime updatedAt = LocalDateTime.of(2026, 7, 27, 12, 30);
-        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
             .id(1L)
             .evaluateStatus(AsyncTaskStatus.PENDING)
             .updatedAt(updatedAt)
@@ -63,7 +67,7 @@ class VoiceInterviewControllerEvaluationTest {
     @Test
     @DisplayName("用户对 PENDING 评估重新生成时应真实重新投递")
     void shouldRequeuePendingEvaluationOnExplicitRetry() {
-        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder()
+        VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L)
             .id(2L)
             .evaluateStatus(AsyncTaskStatus.PENDING)
             .build();

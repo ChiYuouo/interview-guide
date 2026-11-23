@@ -104,7 +104,7 @@ public class VoiceHistoryLoader {
     // 5. 压缩：turns = pending + 窗口，coveredTurns 恒为 0（换算在 Loader 完成）
     List<VoiceInterviewMessageEntity> turns = new ArrayList<>(pending);
     turns.addAll(recent);
-    var compressed = compressor.compress(turns, cachedSummary, 0, llmProvider);
+    var compressed = compressor.compress(interviewService.getSession(sessionId).getUserId(), turns, cachedSummary, 0, llmProvider);
 
     // 6. 持久化推进后的边界（LLM 已在 compress 内完成，事务在 saveSummaryRow 内）
     if (compressed.changed() && compressed.summary() != null && !compressed.summary().isBlank()

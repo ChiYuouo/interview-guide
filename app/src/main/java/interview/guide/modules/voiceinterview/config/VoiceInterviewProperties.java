@@ -62,11 +62,6 @@ public class VoiceInterviewProperties {
      * TTS WebSocket 建连超时（秒），避免 SDK 握手失败后永久等待。
      */
     private int ttsConnectTimeoutSeconds = 5;
-    /**
-     * 是否在应用启动时预热开场白音频缓存。默认关闭，避免启动时产生云端 TTS 调用。
-     */
-    private boolean openingAudioWarmupEnabled = false;
-
     @Data
     public static class PhaseConfig {
         private DurationConfig intro = new DurationConfig(3, 5, 8, 2, 5);
@@ -153,6 +148,7 @@ public class VoiceInterviewProperties {
 
     @Data
     public static class QwenTtsConfig {
+        private String url = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime";
         private String model = "qwen3-tts-flash-realtime";
         private String apiKey;
         private String voice = "Cherry";

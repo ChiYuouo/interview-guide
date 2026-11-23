@@ -1,4 +1,4 @@
-import { BrowserRouter, matchPath, Navigate, Route, Routes, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { BrowserRouter, Link, matchPath, Navigate, Route, Routes, useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import Layout from './components/Layout';
 import { useEffect, useState, Suspense, lazy } from 'react';
 import { historyApi, type InterviewDetail } from './api/history';
@@ -7,7 +7,7 @@ import type { CategoryDTO } from './api/skill';
 import { Loader2 } from 'lucide-react';
 import { ROUTE_PATTERNS, ROUTES } from './constants/routes';
 import { authApi } from './api/auth';
-import { SESSION_EXPIRED_EVENT, SessionExpiredError, getErrorMessage } from './api/request';
+import { SESSION_EXPIRED_EVENT, MODEL_CONFIGURATION_REQUIRED_EVENT, SessionExpiredError, getErrorMessage } from './api/request';
 import type { UserSession } from './types/auth';
 
 // Lazy load components
@@ -194,6 +194,15 @@ function AppRoutes() {
   const location = useLocation();
   const [session, setSession] = useState<UserSession | null>();
   const [sessionError, setSessionError] = useState('');
+  const [modelConfigurationError, setModelConfigurationError] = useState('');
+  useEffect(() => {
+    const onRequired = (event: Event) => setModelConfigurationError((event as CustomEvent<string>).detail);
+    window.addEventListener(MODEL_CONFIGURATION_REQUIRED_EVENT, onRequired);
+    return () => window.removeEventListener(MODEL_CONFIGURATION_REQUIRED_EVENT, onRequired);
+  }, []);
+  useEffect(() => {
+    if (location.pathname === ROUTES.settings) setModelConfigurationError('');
+  }, [location.pathname]);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -233,7 +242,7 @@ function AppRoutes() {
   if (session === undefined) return <Loading />;
 
   if (session && !session.admin
-      && ![ROUTES.login, ROUTES.interviewSchedule, ROUTES.resumeUpload, ROUTES.resumeHistory,
+      && ![ROUTES.login, ROUTES.settings, ROUTES.interviewSchedule, ROUTES.resumeUpload, ROUTES.resumeHistory,
         `${ROUTES.resumeHistory}/:resumeId`, ROUTES.interviewHub, ROUTES.interviewHistory,
         ROUTES.interview, `/${ROUTE_PATTERNS.interviewCreate}`, `/${ROUTE_PATTERNS.interviewSession}`,
         `/${ROUTE_PATTERNS.interviewLegacy}`, `/${ROUTE_PATTERNS.interviewDetail}`,
@@ -258,6 +267,7 @@ function AppRoutes() {
   }
 
   return (
+    <>
         <Routes>
           <Route path={ROUTES.login} element={session
             ? <Navigate to={returnTo} replace />
@@ -325,13 +335,21 @@ function AppRoutes() {
             <Route path={ROUTES.interviewSchedule.slice(1)} element={<InterviewSchedulePage />} />
 
             {/* 设置 */}
-            <Route path="settings" element={<SettingsPage />} />
+            <Route path={ROUTES.settings.slice(1)} element={<SettingsPage />} />
 
             {/* 问答助手（知识库聊天） */}
             <Route path={ROUTES.knowledgebaseChat.slice(1)} element={<KnowledgeBaseQueryPageWrapper />} />
           </Route>
 
         </Routes>
+        {session && modelConfigurationError && (
+          <div role="alert" className="fixed bottom-6 left-1/2 z-[100] flex max-w-[90vw] -translate-x-1/2 items-center gap-4 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 shadow-lg">
+            <span>{modelConfigurationError}</span>
+            <Link to={ROUTES.settings} onClick={() => setModelConfigurationError('')} className="whitespace-nowrap font-semibold underline">前往设置</Link>
+            <button type="button" aria-label="关闭配置提示" onClick={() => setModelConfigurationError('')}>×</button>
+          </div>
+        )}
+    </>
   );
 }
 

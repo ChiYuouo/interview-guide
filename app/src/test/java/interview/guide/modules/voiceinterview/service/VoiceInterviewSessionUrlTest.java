@@ -26,7 +26,7 @@ class VoiceInterviewSessionUrlTest {
   @DisplayName("会话返回相对 WebSocket 路径，不绑定后端主机和 HTTP 协议")
   void returnsDeploymentIndependentSocketPath() {
     when(redissonClient.<VoiceInterviewSessionEntity>getBucket(anyString())).thenReturn(bucket);
-    when(bucket.get()).thenReturn(VoiceInterviewSessionEntity.builder()
+    when(bucket.get()).thenReturn(VoiceInterviewSessionEntity.builder().userId(1L)
         .id(42L)
         .userId(1L)
         .currentPhase(VoiceInterviewSessionEntity.InterviewPhase.TECH)

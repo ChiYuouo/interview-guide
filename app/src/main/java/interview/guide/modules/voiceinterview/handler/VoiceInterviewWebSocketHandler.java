@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
+import interview.guide.modules.llmprovider.service.LlmProviderConfigService;
 import io.micrometer.core.instrument.MeterRegistry;
 import interview.guide.modules.voiceinterview.dto.WebSocketControlMessage;
 import interview.guide.modules.voiceinterview.dto.WebSocketSubtitleMessage;
@@ -16,7 +17,6 @@ import interview.guide.modules.voiceinterview.service.QwenAsrService;
 import interview.guide.modules.voiceinterview.service.QwenTtsService;
 import interview.guide.modules.voiceinterview.service.DashscopeLlmService;
 import interview.guide.modules.voiceinterview.service.VoiceInterviewService;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.DisposableBean;
@@ -29,9 +29,11 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.LinkedHashSet;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -60,9 +62,12 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler implements DisposableBean {
 
+    private static final int OPENING_AUDIO_CACHE_LIMIT = 32;
+
     private final ObjectMapper objectMapper;
     private final QwenAsrService sttService;
     private final QwenTtsService ttsService;
+    private final LlmProviderConfigService providerConfigService;
     private final DashscopeLlmService llmService;
     private final VoiceInterviewService interviewService;
     private final VoiceContextCompressor voiceContextCompressor;
@@ -82,7 +87,15 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
     private final Map<Long, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final Map<Long, SessionState> sessionStates = new ConcurrentHashMap<>();
-    private final Map<String, byte[]> openingAudioCache = new ConcurrentHashMap<>();
+    private final Map<OpeningAudioKey, byte[]> openingAudioCache = Collections.synchronizedMap(
+        new LinkedHashMap<>(OPENING_AUDIO_CACHE_LIMIT, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<OpeningAudioKey, byte[]> eldest) {
+                return size() > OPENING_AUDIO_CACHE_LIMIT;
+            }
+        });
+
+    private record OpeningAudioKey(Long userId, String text, LocalDateTime settingsUpdatedAt) {}
 
     // Activity tracking for pause timeout
     // 活动跟踪（用于暂停超时）
@@ -109,44 +122,6 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
         executor.setRemoveOnCancelPolicy(true);
         executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
         return executor;
-    }
-
-    @PostConstruct
-    void warmupOpeningAudioCache() {
-        if (!voiceInterviewProperties.isOpeningAudioWarmupEnabled()) {
-            log.info("Opening audio cache warmup is disabled");
-            return;
-        }
-        voicePipelineExecutor.execute(() -> {
-            try {
-                VoiceInterviewProperties.OpeningConfig opening = voiceInterviewProperties.getOpening();
-                if (opening == null) {
-                    return;
-                }
-                LinkedHashSet<String> allTemplates = new LinkedHashSet<>();
-                if (opening.getSkillQuestions() != null) {
-                    allTemplates.addAll(opening.getSkillQuestions().values());
-                }
-                allTemplates.add(opening.getAlgorithmQuestion());
-                allTemplates.add(opening.getBackendQuestion());
-                for (String template : allTemplates) {
-                    preloadOpeningAudio(template);
-                }
-                log.info("Opening audio cache warmed: {} entries", openingAudioCache.size());
-            } catch (Exception e) {
-                log.warn("Opening audio cache warmup skipped: {}", e.getMessage());
-            }
-        });
-    }
-
-    private void preloadOpeningAudio(String text) {
-        if (text == null || text.isBlank()) {
-            return;
-        }
-        byte[] wavAudio = synthesizeToWav(text);
-        if (wavAudio.length > 0) {
-            openingAudioCache.put(text, wavAudio);
-        }
     }
 
     @Override
@@ -251,7 +226,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                 sendTextMessage(session, aiReply, true);
 
                 // 语音随后下发
-                byte[] wavAudio = getOpeningWavAudio(aiReply);
+                byte[] wavAudio = getOpeningWavAudio(sessionEntity.getUserId(), aiReply);
                 if (wavAudio.length > 0 && session.isOpen()) {
                     sendAudio(session, wavAudio, aiReply);
                 }
@@ -263,24 +238,19 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
         });
     }
 
-    private byte[] getOpeningWavAudio(String text) {
-        byte[] cached = openingAudioCache.get(text);
+    private byte[] getOpeningWavAudio(Long userId, String text) {
+        var key = new OpeningAudioKey(userId, text, providerConfigService.getVoiceSettingsUpdatedAt(userId));
+        byte[] cached = openingAudioCache.get(key);
         if (cached != null && cached.length > 0) {
             return cached;
         }
-        byte[] wav = synthesizeToWav(text);
-        if (wav.length > 0) {
-            openingAudioCache.put(text, wav);
-        }
-        return wav;
-    }
-
-    private byte[] synthesizeToWav(String text) {
-        byte[] pcm = ttsService.synthesize(text);
+        byte[] pcm = ttsService.synthesize(userId, text);
         if (pcm == null || pcm.length == 0) {
             return new byte[0];
         }
-        return convertPcmToWav(pcm);
+        byte[] wav = convertPcmToWav(pcm);
+        openingAudioCache.put(key, wav);
+        return wav;
     }
 
     private String buildOpeningQuestion(VoiceInterviewSessionEntity sessionEntity) {
@@ -663,7 +633,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                 boolean chunkedEnabled = voiceInterviewProperties.isChunkedAudioEnabled();
                 long ttsTimeoutSec = Math.max(5, voiceInterviewProperties.getTtsTimeoutSeconds());
                 OrderedTtsChunkEmitter chunkEmitter = chunkedEnabled
-                    ? new OrderedTtsChunkEmitter(sessionId, session, ttsSemaphore, ttsTimeoutSec)
+                    ? new OrderedTtsChunkEmitter(sessionId, sessionEntity.getUserId(), session, ttsSemaphore, ttsTimeoutSec)
                     : null;
                 List<CompletableFuture<byte[]>> ttsFutures = new ArrayList<>();
 
@@ -693,7 +663,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                         ttsSemaphore.acquireUninterruptibly();
                         CompletableFuture<byte[]> future = CompletableFuture.supplyAsync(() -> {
                             try {
-                                return ttsService.synthesize(sentence);
+                                return ttsService.synthesize(sessionEntity.getUserId(), sentence);
                             } finally {
                                 ttsSemaphore.release();
                             }
@@ -727,7 +697,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                         log.info("[Session: {}] Streaming TTS produced no chunks, falling back to full-text TTS",
                             sessionId);
                         try {
-                            byte[] fallbackPcm = ttsService.synthesize(aiReply);
+                            byte[] fallbackPcm = ttsService.synthesize(sessionEntity.getUserId(), aiReply);
                             if (fallbackPcm != null && fallbackPcm.length > 0) {
                                 sendAudio(session, convertPcmToWav(fallbackPcm), aiReply);
                             }
@@ -767,7 +737,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                         log.info("[Session: {}] All {} sentence TTS calls failed, falling back to full-text TTS",
                             sessionId, failedCount);
                         try {
-                            byte[] fallbackPcm = ttsService.synthesize(aiReply);
+                            byte[] fallbackPcm = ttsService.synthesize(sessionEntity.getUserId(), aiReply);
                             if (fallbackPcm != null && fallbackPcm.length > 0) {
                                 byte[] wavAudio = convertPcmToWav(fallbackPcm);
                                 log.info("[Session: {}] Fallback TTS succeeded, WAV size: {} bytes",
@@ -816,7 +786,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
                 long ttsStartNanos = System.nanoTime();
                 log.info("[Session: {}] Starting TTS synthesis for text (length: {})",
                     sessionId, aiReply.length());
-                byte[] aiAudio = ttsService.synthesize(aiReply);
+                byte[] aiAudio = ttsService.synthesize(sessionEntity.getUserId(), aiReply);
                 recordTimerSinceNanos("app.voice.interview.tts.duration", ttsStartNanos, "status", "success");
 
                 if (!session.isOpen()) {
@@ -989,6 +959,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
     private class OrderedTtsChunkEmitter {
 
         private final Long sessionId;
+        private final Long userId;
         private final WebSocketSession session;
         private final Semaphore ttsSemaphore;
         private final long ttsTimeoutSec;
@@ -1001,10 +972,12 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
 
         OrderedTtsChunkEmitter(
                 Long sessionId,
+                Long userId,
                 WebSocketSession session,
                 Semaphore ttsSemaphore,
                 long ttsTimeoutSec) {
             this.sessionId = sessionId;
+            this.userId = userId;
             this.session = session;
             this.ttsSemaphore = ttsSemaphore;
             this.ttsTimeoutSec = ttsTimeoutSec;
@@ -1016,7 +989,7 @@ public class VoiceInterviewWebSocketHandler extends TextWebSocketHandler impleme
             ttsSemaphore.acquireUninterruptibly();
             CompletableFuture<byte[]> future = CompletableFuture.supplyAsync(() -> {
                 try {
-                    return ttsService.synthesize(sentence);
+                    return ttsService.synthesize(userId, sentence);
                 } finally {
                     ttsSemaphore.release();
                 }

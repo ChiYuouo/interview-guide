@@ -53,15 +53,15 @@ public class VoiceContextCompressor {
      * @param coveredTurns  已被摘要覆盖的轮次数（用于增量合并，避免重复摘要）
      * @return 压缩结果：summary（可能为 null）、recent（保留的近期轮次）、coveredTurns、changed
      */
-    public CompressedHistory compress(List<VoiceInterviewMessageEntity> turns,
+    public CompressedHistory compress(Long userId, List<VoiceInterviewMessageEntity> turns,
                                        String cachedSummary, int coveredTurns) {
-        return compress(turns, cachedSummary, coveredTurns, null);
+        return compress(userId, turns, cachedSummary, coveredTurns, null);
     }
 
     /**
      * 使用会话指定的 LLM 提供商压缩对话历史。
      */
-    public CompressedHistory compress(List<VoiceInterviewMessageEntity> turns,
+    public CompressedHistory compress(Long userId, List<VoiceInterviewMessageEntity> turns,
                                        String cachedSummary, int coveredTurns,
                                        String llmProvider) {
         var cfg = properties.getContextCompression();
@@ -103,7 +103,7 @@ public class VoiceContextCompressor {
             // 仅对「尚未覆盖的早期轮次」做增量摘要合并，避免每轮都调用 LLM
             // earlyCount > coveredTurns 防御上游脏数据（如被损坏的 SUMMARY 行），避免 subList(from > to) 抛异常
             List<String> earlyTurns = formatRecent(turns.subList(effectiveCoveredTurns, earlyCount));
-            String newSummary = summarize(cachedSummary, earlyTurns, llmProvider);
+            String newSummary = summarize(userId, cachedSummary, earlyTurns, llmProvider);
             if (newSummary == null) {
                 // 摘要生成失败：有旧摘要保留旧摘要，无旧摘要降级 WINDOW；不允许恢复为全量历史
                 summaryFailed = true;
@@ -276,7 +276,7 @@ public class VoiceContextCompressor {
     /**
      * 将早期轮次增量合并进已有摘要。生成失败返回 null，由调用方降级为最近窗口，不阻塞主链路。
      */
-    private String summarize(String prevSummary, List<String> earlyTurns, String llmProvider) {
+    private String summarize(Long userId, String prevSummary, List<String> earlyTurns, String llmProvider) {
         if (earlyTurns == null || earlyTurns.isEmpty()) {
             return prevSummary;
         }
@@ -287,9 +287,7 @@ public class VoiceContextCompressor {
             ));
             // 使用不带 SkillsTool / MemoryAdvisor 的 plain client：摘要是纯文本压缩，
             // 不应混入面试素材工具，也不应让 MemoryAdvisor 重新注入完整历史（否则抵消压缩收益）
-            String result = (llmProvider == null
-                    ? llmProviderRegistry.getPlainChatClient()
-                    : llmProviderRegistry.getPlainChatClient(llmProvider))
+            String result = llmProviderRegistry.getPlainChatClient(userId, llmProvider)
                     .prompt().user(prompt).call().content();
             return (result == null || result.isBlank()) ? null : result.trim();
         } catch (Exception e) {

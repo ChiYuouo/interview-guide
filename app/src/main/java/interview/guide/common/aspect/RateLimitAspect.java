@@ -2,6 +2,7 @@ package interview.guide.common.aspect;
 
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.exception.RateLimitExceededException;
+import interview.guide.modules.auth.model.AccountPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,7 @@ import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -256,6 +258,10 @@ public class RateLimitAspect {
     }
 
     private String getCurrentUserId() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof AccountPrincipal account) {
+            return account.getUserId().toString();
+        }
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attributes == null) {
             return "anonymous";
@@ -264,11 +270,6 @@ public class RateLimitAspect {
         HttpServletRequest request = attributes.getRequest();
 
         Object userId = request.getAttribute("userId");
-        if (userId != null) {
-            return userId.toString();
-        }
-
-        userId = request.getHeader("X-User-Id");
         if (userId != null) {
             return userId.toString();
         }

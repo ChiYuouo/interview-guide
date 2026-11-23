@@ -1,5 +1,6 @@
 package interview.guide.modules.knowledgebase.service;
 
+import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.config.KnowledgeBaseUploadProperties;
 import interview.guide.infrastructure.file.FileHashService;
 import interview.guide.infrastructure.file.FileStorageService;
@@ -27,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -57,7 +59,7 @@ class KnowledgeBaseUploadServiceTest {
   void setUp() {
     service = new KnowledgeBaseUploadService(parseService, persistenceService, storageService,
         knowledgeBaseRepository, fileValidationService, fileHashService, vectorizeStreamProducer,
-        new KnowledgeBaseUploadLimiter(new KnowledgeBaseUploadProperties()));
+        new KnowledgeBaseUploadLimiter(new KnowledgeBaseUploadProperties()), mock(LlmProviderRegistry.class));
   }
 
   @Test
@@ -70,6 +72,7 @@ class KnowledgeBaseUploadServiceTest {
     when(storageService.uploadKnowledgeBase(file)).thenReturn("kb/1");
     when(storageService.getFileUrl("kb/1")).thenReturn("http://rustfs/kb/1");
     KnowledgeBaseEntity saved = new KnowledgeBaseEntity();
+        saved.setUserId(1L);
     saved.setId(11L);
     saved.setName("a.pdf");
     saved.setFileSize(3L);
@@ -102,6 +105,7 @@ class KnowledgeBaseUploadServiceTest {
     when(storageService.uploadKnowledgeBase(file)).thenReturn("kb/12");
     when(storageService.getFileUrl("kb/12")).thenReturn("http://rustfs/kb/12");
     KnowledgeBaseEntity saved = new KnowledgeBaseEntity();
+        saved.setUserId(1L);
     saved.setId(12L);
     saved.setName("a.pdf");
     saved.setFileSize(3L);
@@ -190,6 +194,7 @@ class KnowledgeBaseUploadServiceTest {
     when(parseService.detectContentType(file)).thenReturn("application/pdf");
     when(fileHashService.calculateHash(file)).thenReturn("hash-dup");
     KnowledgeBaseEntity existing = new KnowledgeBaseEntity();
+        existing.setUserId(1L);
     existing.setId(21L);
     existing.setName("a.pdf");
     existing.setFileSize(3L);
@@ -219,6 +224,7 @@ class KnowledgeBaseUploadServiceTest {
   @DisplayName("重新向量化只校验存储信息并投递 ID，不下载解析")
   void shouldRevectorizeWithIdOnly() {
     KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+        kb.setUserId(1L);
     kb.setId(11L);
     kb.setStorageKey("kb/11");
     kb.setOriginalFilename("a.pdf");
@@ -237,6 +243,7 @@ class KnowledgeBaseUploadServiceTest {
   @DisplayName("手动重试投递失败抛出业务异常")
   void shouldThrowWhenManualRetryEnqueueFails() {
     KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+        kb.setUserId(1L);
     kb.setId(13L);
     kb.setStorageKey("kb/13");
     kb.setOriginalFilename("a.pdf");

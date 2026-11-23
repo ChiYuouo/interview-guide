@@ -2,6 +2,7 @@ package interview.guide.modules.voiceinterview.controller;
 
 import interview.guide.common.model.AsyncTaskStatus;
 import interview.guide.common.result.Result;
+import interview.guide.modules.llmprovider.service.LlmProviderConfigService;
 import interview.guide.modules.auth.model.AccountPrincipal;
 import interview.guide.modules.resume.service.ResumePersistenceService;
 import interview.guide.modules.voiceinterview.dto.CreateSessionRequest;
@@ -52,6 +53,7 @@ public class VoiceInterviewController {
     private final VoiceInterviewEvaluationService evaluationService;
     private final VoiceEvaluateStreamProducer voiceEvaluateStreamProducer;
     private final ResumePersistenceService resumes;
+    private final LlmProviderConfigService configService;
 
     /**
      * Create a new voice interview session
@@ -62,6 +64,7 @@ public class VoiceInterviewController {
         if (request.getResumeId() != null) {
             resumes.requireOwnedResume(account.getUserId(), request.getResumeId());
         }
+        configService.requireVoiceConfigured(account.getUserId());
         log.info("Creating voice interview session for role: {}", request.getRoleType());
         SessionResponseDTO session = voiceInterviewService.createSession(account.getUserId(), request);
         return Result.success(session);
@@ -220,6 +223,7 @@ public class VoiceInterviewController {
                     .build());
         }
 
+        configService.requireChatConfigured(account.getUserId(), session.getLlmProvider());
         // Trigger new async evaluation via service
         voiceInterviewService.triggerEvaluation(sessionId);
 

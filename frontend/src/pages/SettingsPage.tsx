@@ -142,6 +142,7 @@ export default function SettingsPage() {
   const [defaultProviderId, setDefaultProviderId] = useState('');
   const [defaultEmbeddingProviderId, setDefaultEmbeddingProviderId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
@@ -213,6 +214,8 @@ export default function SettingsPage() {
   ), [defaultEmbeddingProviderId]);
 
   const loadData = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
     try {
       const [providerList, defaultProvider, asr, tts] = await Promise.all([
         llmProviderApi.list(),
@@ -221,17 +224,17 @@ export default function SettingsPage() {
         llmProviderApi.getTtsConfig(),
       ]);
       setProviders(providerList);
-      setDefaultProviderId(defaultProvider.defaultProvider);
-      setDefaultEmbeddingProviderId(defaultProvider.defaultEmbeddingProvider);
+      setDefaultProviderId(defaultProvider.defaultProvider ?? '');
+      setDefaultEmbeddingProviderId(defaultProvider.defaultEmbeddingProvider ?? '');
       setAsrConfig(asr);
       setTtsConfig(tts);
     } catch (err) {
       console.error('Failed to load settings:', err);
-      showToast('加载数据失败', 'error');
+      setLoadError(err instanceof Error ? err.message : '加载数据失败');
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -247,6 +250,7 @@ export default function SettingsPage() {
     setFormEmbeddingModel('');
     setFormEmbeddingDimensions('1024');
     setFormSupportsEmbedding(false);
+    setFormTemperature('');
     setShowApiKey(false);
     setShowModal(true);
   };
@@ -268,6 +272,7 @@ export default function SettingsPage() {
   const closeModal = () => {
     setShowModal(false);
     setEditingProvider(null);
+    setFormApiKey('');
   };
 
   // --- CRUD handlers ---
@@ -303,7 +308,7 @@ export default function SettingsPage() {
         if (!isNaN(temp)) data.temperature = temp;
       }
       await llmProviderApi.create(data);
-      showToast('Provider 创建成功');
+      showToast('模型创建成功');
       closeModal();
       await loadData();
     } catch (err) {
@@ -316,7 +321,7 @@ export default function SettingsPage() {
 
   const handleUpdate = async () => {
     if (!editingProvider) return;
-    if (!formBaseUrl.trim() || !formModel.trim()) {
+    if (!formId.trim() || !formBaseUrl.trim() || !formModel.trim()) {
       showToast('请填写必填字段', 'error');
       return;
     }
@@ -348,7 +353,7 @@ export default function SettingsPage() {
         if (!isNaN(temp)) data.temperature = temp;
       }
       await llmProviderApi.update(editingProvider.id, data);
-      showToast('Provider 更新成功');
+      showToast('模型更新成功');
       closeModal();
       await loadData();
     } catch (err) {
@@ -364,7 +369,7 @@ export default function SettingsPage() {
     setDeleting(true);
     try {
       await llmProviderApi.delete(deleteConfirmId);
-      showToast('Provider 已删除');
+      showToast('模型已删除');
       setDeleteConfirmId(null);
       await loadData();
     } catch (err) {
@@ -414,7 +419,7 @@ export default function SettingsPage() {
         defaultProvider: pendingDefaultProviderId,
         defaultEmbeddingProvider: defaultEmbeddingProviderId,
       });
-      showToast(`已将 "${pendingDefaultProviderId}" 设为默认聊天服务`);
+      showToast('已设置默认聊天模型');
       setPendingDefaultProviderId(null);
       await loadData();
     } catch (err) {
@@ -482,6 +487,7 @@ export default function SettingsPage() {
   const openTtsModal = () => {
     if (!ttsConfig) return;
     setTtsForm({
+      url: ttsConfig.url,
       model: ttsConfig.model,
       voice: ttsConfig.voice,
       format: ttsConfig.format,
@@ -550,10 +556,15 @@ export default function SettingsPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-slate-800 dark:text-white">系统设置</h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-0.5 text-sm">管理聊天模型、向量模型和模块配置</p>
+            <p className="text-slate-500 dark:text-slate-400 mt-0.5 text-sm">配置个人聊天、向量和语音服务</p>
           </div>
         </div>
       </div>
+
+      {loadError && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+        {loadError}
+        <button type="button" className="ml-4 underline" onClick={() => void loadData()}>重试</button>
+      </div>}
 
       {/* Loading state */}
       {loading ? (
@@ -603,6 +614,7 @@ export default function SettingsPage() {
                     return (
                     <motion.div
                       key={provider.id}
+                      role="article" aria-label={provider.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
@@ -651,8 +663,7 @@ export default function SettingsPage() {
                         )}
                         <ConfigRow
                           label="API Key"
-                          value={provider.maskedApiKey}
-                          title={provider.maskedApiKey}
+                          value={provider.apiKeyConfigured ?? !!provider.maskedApiKey ? '已配置' : '未配置'}
                           monospace
                           emphasis
                         />
@@ -691,7 +702,7 @@ export default function SettingsPage() {
                         </button>
                         <button
                           onClick={() => handleTest(provider.id)}
-                          disabled={testingId === provider.id}
+                          disabled={testingId === provider.id || !provider.apiKeyConfigured}
                           className={`${ACTION_BUTTON_CLASS} text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20`}
                           title="测试连接"
                         >
@@ -703,7 +714,7 @@ export default function SettingsPage() {
                         </button>
                         <button
                           onClick={() => handleSetDefault(provider.id)}
-                          disabled={isGlobalDefault || settingDefault}
+                          disabled={isGlobalDefault || settingDefault || !provider.apiKeyConfigured}
                           className={`${ACTION_BUTTON_CLASS} text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/20 disabled:hover:bg-transparent dark:disabled:hover:bg-transparent`}
                           title="设为默认文字服务"
                         >
@@ -712,7 +723,7 @@ export default function SettingsPage() {
                         </button>
                         <button
                           onClick={() => handleSetEmbeddingDefault(provider)}
-                          disabled={!canUseEmbedding || isEmbeddingDefault || settingEmbeddingDefault}
+                          disabled={!canUseEmbedding || !provider.apiKeyConfigured || isEmbeddingDefault || settingEmbeddingDefault}
                           className={`${ACTION_BUTTON_CLASS} text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20 disabled:hover:bg-transparent dark:disabled:hover:bg-transparent`}
                           title={canUseEmbedding ? '设为默认向量服务' : '该 Provider 不支持 Embedding'}
                         >
@@ -741,7 +752,7 @@ export default function SettingsPage() {
                 <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2">
                   {/* ASR Card */}
                   {asrConfig && (
-                    <motion.div
+                    <motion.div role="article" aria-label="ASR 语音识别"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className={CARD_CLASS}
@@ -816,7 +827,7 @@ export default function SettingsPage() {
 
                   {/* TTS Card */}
                   {ttsConfig && (
-                    <motion.div
+                    <motion.div role="article" aria-label="TTS 语音合成"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.05 }}
@@ -838,6 +849,7 @@ export default function SettingsPage() {
                       </div>
 
                       <dl className={DETAILS_CLASS}>
+                        <ConfigRow label="WebSocket URL" value={ttsConfig.url} title={ttsConfig.url} emphasis />
                         <ConfigRow label="合成模型" value={ttsConfig.model} title={ttsConfig.model} emphasis />
                         <ConfigRow label="音色" value={ttsConfig.voice} title={ttsConfig.voice} emphasis />
                         <ConfigRow label="采样率" value={`${ttsConfig.sampleRate}Hz`} />
@@ -876,7 +888,7 @@ export default function SettingsPage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={closeModal}
+              onClick={() => { if (!saving) closeModal(); }}
               className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
             />
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -886,19 +898,22 @@ export default function SettingsPage() {
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 onClick={(e) => e.stopPropagation()}
                 className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-lg w-full p-6"
+                role="dialog" aria-modal="true" aria-labelledby="model-dialog-title"
               >
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-5">
+                <h3 id="model-dialog-title" className="text-xl font-bold text-slate-900 dark:text-white mb-5">
                   {editingProvider ? '编辑 Provider' : '新增 Provider'}
                 </h3>
 
                 <div className="space-y-4">
                   {/* Provider ID */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                    <label htmlFor="settings-model-name" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                       Provider ID <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
+                      id="settings-model-name"
+                      maxLength={64}
                       value={formId}
                       onChange={(e) => {
                         const newId = e.target.value;
@@ -914,7 +929,7 @@ export default function SettingsPage() {
                           }
                         }
                       }}
-                      disabled={!!editingProvider}
+                      disabled={saving || !!editingProvider}
                       placeholder="例如: dashscope, deepseek, glm, kimi"
                       className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600
                         bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-white
@@ -926,12 +941,14 @@ export default function SettingsPage() {
 
                   {/* Base URL */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                    <label htmlFor="settings-model-url" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                       Base URL <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
                       value={formBaseUrl}
+                      id="settings-model-url"
+                      maxLength={512}
                       onChange={(e) => setFormBaseUrl(e.target.value)}
                       placeholder="例如: https://api.openai.com/v1"
                       className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600
@@ -943,7 +960,7 @@ export default function SettingsPage() {
 
                   {/* API Key */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                    <label htmlFor="settings-model-key" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                       API Key{' '}
                       {editingProvider && (
                         <span className="text-slate-400 font-normal">(留空则不修改)</span>
@@ -953,6 +970,9 @@ export default function SettingsPage() {
                     <div className="relative">
                       <input
                         type={showApiKey ? 'text' : 'password'}
+                        id="settings-model-key"
+                        autoComplete="new-password"
+                        maxLength={4096}
                         value={formApiKey}
                         onChange={(e) => setFormApiKey(e.target.value)}
                         placeholder={editingProvider ? '留空则保持原值' : '输入 API Key'}
@@ -974,13 +994,15 @@ export default function SettingsPage() {
 
                   {/* Chat Model */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                    <label htmlFor="settings-model-model" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                       聊天模型 <span className="text-red-500">*</span>
                     </label>
                     <div className="relative">
                       <input
                         type="text"
                         value={formModel}
+                        id="settings-model-model"
+                        maxLength={128}
                         onChange={(e) => {
                           setFormModel(e.target.value);
                           setShowModelDropdown(false);
@@ -1283,6 +1305,10 @@ export default function SettingsPage() {
                 ) : (
                   <div className="space-y-4">
                     <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">连接配置</p>
+                    <label className="block text-sm text-slate-700 dark:text-slate-300">WebSocket URL
+                      <input type="text" value={ttsForm.url || ''} onChange={e => setTtsForm(f => ({ ...f, url: e.target.value }))}
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 dark:border-slate-600 dark:bg-slate-700" />
+                    </label>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Model</label>
@@ -1381,7 +1407,7 @@ export default function SettingsPage() {
       <ConfirmDialog
         open={pendingDefaultProviderId !== null}
         title="设为默认聊天服务"
-        message={`确定要将 "${pendingDefaultProviderId ?? ''}" 设为默认聊天服务吗？该操作不会改变知识库使用的向量模型。`}
+        message={`确定将「${pendingDefaultProviderId ?? ''}」设为个人默认聊天模型吗？`}
         confirmText="确认设置"
         cancelText="取消"
         loading={settingDefault}
@@ -1431,8 +1457,7 @@ export default function SettingsPage() {
                   删除 Provider
                 </h3>
                 <p className="text-slate-600 dark:text-slate-300 mb-6">
-                  确定要删除 Provider &ldquo;{deleteConfirmId}&rdquo; 吗？删除后无法恢复。
-                  如果有模块正在使用此 Provider，请先切换到其他 Provider。
+                  确定删除「{deleteConfirmId}」吗？删除后无法恢复。
                 </p>
                 <div className="flex gap-3 justify-end">
                   <motion.button
@@ -1478,6 +1503,7 @@ export default function SettingsPage() {
         {toast && (
           <motion.div
             initial={{ opacity: 0, y: 50, x: '-50%' }}
+            role="status"
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: 50, x: '-50%' }}
             className={`fixed bottom-6 left-1/2 px-5 py-3 rounded-xl shadow-lg text-sm font-medium

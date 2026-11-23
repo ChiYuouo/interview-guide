@@ -124,7 +124,7 @@ public class InterviewSessionEntity {
     private String evaluateError;
 
     // LLM提供商
-    @Column(length = 50)
+    @Column(length = 64)
     private String llmProvider = "dashscope";
 
     // 会话来源：NORMAL / KNOWLEDGE_BASE

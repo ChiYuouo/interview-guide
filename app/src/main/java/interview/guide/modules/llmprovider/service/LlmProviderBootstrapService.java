@@ -22,14 +22,16 @@ public class LlmProviderBootstrapService {
   private final LlmProviderRepository providerRepository;
   private final LlmGlobalSettingRepository globalSettingRepository;
   private final ApiKeyEncryptionService encryptionService;
+  private final LlmProviderConfigService configService;
 
   @PostConstruct
   @Transactional
   public void seedProvidersIfNecessary() {
-    if (providerRepository.count() == 0) {
+    if (providerRepository.findByUserIdOrderByIdAsc(LlmGlobalSettingEntity.ADMIN_USER_ID).isEmpty()) {
       seedProviders();
     }
     ensureGlobalSetting();
+    configService.initializeUserSettings(LlmGlobalSettingEntity.ADMIN_USER_ID);
   }
 
   private void seedProviders() {
@@ -50,6 +52,7 @@ public class LlmProviderBootstrapService {
           || !isBlank(config.getEmbeddingModel());
 
       LlmProviderEntity entity = LlmProviderEntity.builder()
+          .userId(LlmGlobalSettingEntity.ADMIN_USER_ID)
           .id(id)
           .baseUrl(config.getBaseUrl())
           .apiKeyNonce(encrypted.nonce())
@@ -68,12 +71,12 @@ public class LlmProviderBootstrapService {
   }
 
   private void ensureGlobalSetting() {
-    if (globalSettingRepository.existsById(LlmGlobalSettingEntity.SINGLETON_ID)) {
+    if (globalSettingRepository.existsById(LlmGlobalSettingEntity.ADMIN_USER_ID)) {
       return;
     }
     String defaultChatProvider = resolveExistingProvider(
         properties.getDefaultProvider(),
-        providerRepository.findAll().stream().findFirst().map(LlmProviderEntity::getId).orElse("dashscope")
+        providerRepository.findByUserIdOrderByIdAsc(LlmGlobalSettingEntity.ADMIN_USER_ID).stream().findFirst().map(LlmProviderEntity::getId).orElse("dashscope")
     );
     String configuredEmbeddingProvider = !isBlank(properties.getDefaultEmbeddingProvider())
         ? properties.getDefaultEmbeddingProvider()
@@ -81,7 +84,8 @@ public class LlmProviderBootstrapService {
     String defaultEmbeddingProvider = resolveExistingEmbeddingProvider(configuredEmbeddingProvider, defaultChatProvider);
 
     globalSettingRepository.save(LlmGlobalSettingEntity.builder()
-        .id(LlmGlobalSettingEntity.SINGLETON_ID)
+        .id(LlmGlobalSettingEntity.ADMIN_USER_ID)
+        .presetsInitialized(true)
         .defaultChatProviderId(defaultChatProvider)
         .defaultEmbeddingProviderId(defaultEmbeddingProvider)
         .build());
@@ -90,17 +94,17 @@ public class LlmProviderBootstrapService {
   }
 
   private String resolveExistingProvider(String preferredProvider, String fallbackProvider) {
-    if (!isBlank(preferredProvider) && providerRepository.existsById(preferredProvider)) {
+    if (!isBlank(preferredProvider) && providerRepository.existsByIdAndUserId(preferredProvider, LlmGlobalSettingEntity.ADMIN_USER_ID)) {
       return preferredProvider;
     }
     return fallbackProvider;
   }
 
   private String resolveExistingEmbeddingProvider(String preferredProvider, String fallbackProvider) {
-    return providerRepository.findById(preferredProvider)
+    return providerRepository.findByIdAndUserId(preferredProvider, LlmGlobalSettingEntity.ADMIN_USER_ID)
         .filter(this::canProvideEmbedding)
         .map(LlmProviderEntity::getId)
-        .orElseGet(() -> providerRepository.findAll().stream()
+        .orElseGet(() -> providerRepository.findByUserIdOrderByIdAsc(LlmGlobalSettingEntity.ADMIN_USER_ID).stream()
             .filter(this::canProvideEmbedding)
             .findFirst()
             .map(LlmProviderEntity::getId)

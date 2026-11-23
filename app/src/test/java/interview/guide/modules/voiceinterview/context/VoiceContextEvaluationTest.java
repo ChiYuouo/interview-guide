@@ -75,13 +75,13 @@ class VoiceContextEvaluationTest {
     };
     ChatClient client = ChatClient.builder(recording).build();
     LlmProviderRegistry registry = mock(LlmProviderRegistry.class);
-    when(registry.getPlainChatClient()).thenReturn(client);
+    when(registry.getPlainChatClient(1L, null)).thenReturn(client);
     VoiceInterviewProperties properties = new VoiceInterviewProperties();
     var compressor = new VoiceContextCompressor(registry, properties, new DefaultResourceLoader());
     List<VoiceInterviewMessageEntity> turns = fixture();
     String before = String.join("\n", compressor.formatRecent(turns));
     long start = System.nanoTime();
-    var compressed = compressor.compress(turns, null, 0);
+    var compressed = compressor.compress(1L, turns, null, 0);
     double compressionMs = (System.nanoTime() - start) / 1_000_000.0;
     assertThat(compressed.changed()).as("必须真实生成摘要，不能用降级结果充当 SUMMARY 对照").isTrue();
     assertThat(calls).hasSize(1);

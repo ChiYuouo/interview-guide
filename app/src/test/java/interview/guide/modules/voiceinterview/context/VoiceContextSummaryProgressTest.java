@@ -1,8 +1,11 @@
 package interview.guide.modules.voiceinterview.context;
 
+import static org.mockito.Mockito.lenient;
+
 import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
 import interview.guide.modules.voiceinterview.model.VoiceInterviewMessageEntity;
+import interview.guide.modules.voiceinterview.model.VoiceInterviewSessionEntity;
 import interview.guide.modules.voiceinterview.repository.VoiceInterviewMessageRepository;
 import interview.guide.modules.voiceinterview.service.VoiceInterviewService;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,6 +53,7 @@ class VoiceContextSummaryProgressTest {
 
   @BeforeEach
   void setUp() {
+    lenient().when(service.getSession(anyLong())).thenReturn(VoiceInterviewSessionEntity.builder().userId(1L).build());
     properties = new VoiceInterviewProperties();
     compressor = new VoiceContextCompressor(registry, properties, new DefaultResourceLoader());
     loader = new VoiceHistoryLoader(repository, service, compressor, properties);
@@ -73,7 +77,7 @@ class VoiceContextSummaryProgressTest {
   void identicalSummaryStillAdvancesBoundary() {
     stubHistory(messages(21, 30));
     ChatClient client = mock(ChatClient.class, RETURNS_DEEP_STUBS);
-    when(registry.getPlainChatClient()).thenReturn(client);
+    when(registry.getPlainChatClient(1L, null)).thenReturn(client);
     when(client.prompt().user(anyString()).call().content()).thenReturn("已有摘要");
 
     List<String> history = loader.loadHistory(1L, null);
@@ -89,7 +93,7 @@ class VoiceContextSummaryProgressTest {
     properties.getContextCompression().setMaxSummaryChars(100);
     properties.getContextCompression().setMaxHistoryChars(200);
 
-    var result = compressor.compress(messages(1, 15), "摘要".repeat(100), 0);
+    var result = compressor.compress(1L, messages(1, 15), "摘要".repeat(100), 0);
 
     assertThat(result.summary()).hasSize(100).endsWith("(摘要已截断)");
     int historyChars = compressor.formatRecent(result.recent()).stream()
@@ -105,7 +109,7 @@ class VoiceContextSummaryProgressTest {
   void windowModeIgnoresCachedSummary() {
     properties.getContextCompression().setMode(VoiceInterviewProperties.Mode.WINDOW);
 
-    var result = compressor.compress(messages(1, 30), "已有摘要", 0);
+    var result = compressor.compress(1L, messages(1, 30), "已有摘要", 0);
 
     assertThat(result.summary()).isNull();
     assertThat(result.recent()).hasSize(20);

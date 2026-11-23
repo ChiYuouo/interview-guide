@@ -1,6 +1,8 @@
 package interview.guide.modules.interview.service;
 
 import interview.guide.common.ai.LlmProviderRegistry;
+import interview.guide.common.exception.BusinessException;
+import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.infrastructure.redis.InterviewSessionCache.CachedSession;
 import interview.guide.infrastructure.redis.RedisService;
@@ -23,6 +25,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -120,7 +123,7 @@ class InterviewSessionIdempotencyTest {
     assertThat(result.sessionId()).isEqualTo(existingSessionId);
     verify(redisService).executeWithLock(
         eq("interview:create:1:" + requestId), anyLong(), anyLong(), any(), any());
-    verify(questionService, never()).generateQuestionsBySkill(
+    verify(questionService, never()).generateQuestionsBySkill(anyLong(),
         any(), anyString(), anyString(), any(), anyInt(), any(), any(), any());
   }
 
@@ -141,13 +144,27 @@ class InterviewSessionIdempotencyTest {
   }
 
   @Test
+  @DisplayName("没有个人模型时在出题和写入会话前提示配置")
+  void rejectsCreationBeforeGeneratingQuestionsWhenModelIsMissing() {
+    var request = new CreateInterviewRequest("", 8, null, true,
+        null, "java-backend", "mid", null, null, null);
+    when(llmProviderRegistry.resolveChatProviderId(2L, null)).thenThrow(
+        new BusinessException(ErrorCode.PROVIDER_CONFIG_READ_FAILED, "请先配置模型和 API Key"));
+
+    assertThatThrownBy(() -> service.createSession(2L, request))
+        .isInstanceOf(BusinessException.class).hasMessage("请先配置模型和 API Key");
+    verifyNoInteractions(questionService, persistenceService, sessionCache, evaluateStreamProducer);
+  }
+
+  @Test
   @DisplayName("没有幂等键的会话保存失败时仍按原流程写入当前账号缓存")
   void preservesCacheFallbackForNonIdempotentCreation() {
     long userId = 2L;
     var questions = List.of(InterviewQuestionDTO.create(0, "什么是 JVM？", "JVM", "JVM"));
     var request = new CreateInterviewRequest("简历文本", 8, null, true,
         "glm", "java-backend", "mid", null, null, null);
-    when(questionService.generateQuestionsBySkill(any(), anyString(), anyString(), any(), anyInt(), any(), any(), any()))
+    when(llmProviderRegistry.resolveChatProviderId(userId, "glm")).thenReturn("glm");
+    when(questionService.generateQuestionsBySkill(anyLong(), any(), anyString(), anyString(), any(), anyInt(), any(), any(), any()))
         .thenReturn(questions);
     when(persistenceService.saveSession(eq(userId), anyString(), isNull(), eq(1), eq(questions),
         eq("glm"), eq("java-backend"), eq("mid"))).thenThrow(new IllegalStateException("数据库不可用"));

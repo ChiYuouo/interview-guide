@@ -1,5 +1,7 @@
 package interview.guide.modules.knowledgebase.service;
 
+import interview.guide.common.ai.LlmProviderRegistry;
+
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.file.FileStorageService;
@@ -222,6 +224,9 @@ class KnowledgeBaseIsolationTest {
       KnowledgeBaseQuestionService.class, KnowledgeBaseInterviewService.class,
       QuestionGenerationStateService.class, RagChatSessionService.class, RagChatMapperImpl.class})
   static class Config {
+    @Bean
+    LlmProviderRegistry providerRegistry() { return mock(LlmProviderRegistry.class); }
+
     @Bean
     DataSource dataSource() {
       return new DriverManagerDataSource("jdbc:h2:mem:kb-isolation;DB_CLOSE_DELAY=-1", "sa", "");

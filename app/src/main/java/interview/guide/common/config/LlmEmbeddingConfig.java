@@ -1,31 +1,27 @@
 package interview.guide.common.config;
 
 import interview.guide.common.ai.LlmProviderRegistry;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.embedding.EmbeddingRequest;
-import org.springframework.ai.embedding.EmbeddingResponse;
-import org.springframework.context.annotation.Bean;
+import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.pgvector.PgVectorStore;
+import org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@Slf4j
+@EnableConfigurationProperties(PgVectorStoreProperties.class)
+@RequiredArgsConstructor
 public class LlmEmbeddingConfig {
+  private final LlmProviderRegistry registry;
+  private final JdbcTemplate jdbcTemplate;
+  private final PgVectorStoreProperties properties;
 
-  @Bean
-  public EmbeddingModel embeddingModel(LlmProviderRegistry registry) {
-    log.info("EmbeddingModel bean initialized as registry delegate");
-    return new EmbeddingModel() {
-      @Override
-      public EmbeddingResponse call(EmbeddingRequest request) {
-        return registry.getDefaultEmbeddingModel().call(request);
-      }
-
-      @Override
-      public float[] embed(Document document) {
-        return registry.getDefaultEmbeddingModel().embed(document);
-      }
-    };
+  public VectorStore vectorStoreForUser(Long userId) {
+    return PgVectorStore.builder(jdbcTemplate, registry.getDefaultEmbeddingModel(userId))
+        .schemaName(properties.getSchemaName()).idType(properties.getIdType())
+        .vectorTableName(properties.getTableName()).dimensions(properties.getDimensions())
+        .distanceType(properties.getDistanceType()).indexType(properties.getIndexType())
+        .initializeSchema(false).maxDocumentBatchSize(properties.getMaxDocumentBatchSize()).build();
   }
 }

@@ -1,5 +1,6 @@
 package interview.guide.modules.knowledgebase.service;
 
+import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.modules.knowledgebase.listener.QuestionGenStreamProducer;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseEntity;
 import interview.guide.modules.knowledgebase.model.KnowledgeBaseQuestionDTO;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,7 +46,8 @@ class KnowledgeBaseQuestionServiceTest {
         questionRepository,
         objectMapper,
         questionGenStreamProducer,
-        questionGenerationStateService
+        questionGenerationStateService,
+        mock(LlmProviderRegistry.class)
     );
   }
 
@@ -103,6 +106,7 @@ class KnowledgeBaseQuestionServiceTest {
 
   private KnowledgeBaseQuestionEntity entity(String question, String category) {
     KnowledgeBaseEntity kb = new KnowledgeBaseEntity();
+        kb.setUserId(1L);
     kb.setId(1L);
     kb.setName("Spring Boot 实战");
     KnowledgeBaseQuestionEntity entity = new KnowledgeBaseQuestionEntity();

@@ -92,7 +92,7 @@ class LlmProviderRegistryPathIntegrationTest {
     LlmProviderRegistry registry =
         buildRegistryFor("http://127.0.0.1:" + port + "/compatible-mode/v1");
 
-    ChatClient client = registry.getChatClient("probe");
+    ChatClient client = registry.getChatClient(1L, "probe");
     client.prompt("hi").call().content();
 
     assertThat(receivedPaths).hasSize(1);
@@ -106,7 +106,7 @@ class LlmProviderRegistryPathIntegrationTest {
   void baseUrlWithoutVersion_defaultPath() {
     LlmProviderRegistry registry = buildRegistryFor("http://127.0.0.1:" + port);
 
-    ChatClient client = registry.getChatClient("probe");
+    ChatClient client = registry.getChatClient(1L, "probe");
     client.prompt("hi").call().content();
 
     assertThat(receivedPaths).hasSize(1);
@@ -118,7 +118,7 @@ class LlmProviderRegistryPathIntegrationTest {
   void baseUrlWithV3_noDoubleVersion() {
     LlmProviderRegistry registry = buildRegistryFor("http://127.0.0.1:" + port + "/api/v3");
 
-    ChatClient client = registry.getChatClient("probe");
+    ChatClient client = registry.getChatClient(1L, "probe");
     client.prompt("hi").call().content();
 
     assertThat(receivedPaths).hasSize(1);

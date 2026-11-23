@@ -38,7 +38,7 @@ public class DashscopeLlmService {
             String provider = session.getLlmProvider();
             log.info("[VoiceInterview] Session {} using LLM provider: {}", session.getId(), provider);
 
-            ChatClient chatClient = llmProviderRegistry.getVoiceChatClient(provider);
+            ChatClient chatClient = llmProviderRegistry.getVoiceChatClient(session.getUserId(), provider);
 
             ChatClient.CallResponseSpec response = chatClient.prompt()
                 .system(promptContext.systemPrompt())
@@ -78,7 +78,7 @@ public class DashscopeLlmService {
             String provider = session.getLlmProvider();
             log.info("[VoiceInterview] Session {} using LLM provider (sentence stream): {}", session.getId(), provider);
 
-            ChatClient chatClient = llmProviderRegistry.getVoiceChatClient(provider);
+            ChatClient chatClient = llmProviderRegistry.getVoiceChatClient(session.getUserId(), provider);
             StringBuilder raw = new StringBuilder();
             AtomicLong lastEmitNanos = new AtomicLong(System.nanoTime());
             AtomicInteger lastEmitLength = new AtomicInteger(0);

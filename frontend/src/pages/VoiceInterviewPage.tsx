@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { ROUTES } from '../constants/routes';
 import { Clock, PhoneOff, AlertCircle, Bot, Mic, ArrowLeft, SendHorizonal } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AudioRecorder from '../components/AudioRecorder';
@@ -779,6 +780,7 @@ export default function VoiceInterviewPage() {
           <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 px-4 py-3 rounded-xl flex items-center gap-2">
             <AlertCircle className="w-4 h-4" />
             <span className="text-sm">{error}</span>
+            {error.includes('配置') && <Link to={ROUTES.settings} className="ml-auto whitespace-nowrap text-sm underline">前往设置</Link>}
           </div>
         )}
 

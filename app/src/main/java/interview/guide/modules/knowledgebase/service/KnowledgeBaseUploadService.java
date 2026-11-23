@@ -1,6 +1,7 @@
 package interview.guide.modules.knowledgebase.service;
 
 import interview.guide.common.exception.BusinessException;
+import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.infrastructure.file.FileHashService;
 import interview.guide.infrastructure.file.FileStorageService;
@@ -37,6 +38,7 @@ public class KnowledgeBaseUploadService {
     private final FileHashService fileHashService;
     private final VectorizeStreamProducer vectorizeStreamProducer;
     private final KnowledgeBaseUploadLimiter uploadLimiter;
+    private final LlmProviderRegistry registry;
 
     private static final long MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
     
@@ -55,6 +57,7 @@ public class KnowledgeBaseUploadService {
 
     private Map<String, Object> doUploadKnowledgeBase(
         Long userId, MultipartFile file, String name, String category) {
+        registry.getDefaultEmbeddingModel(userId);
         // 1. 验证文件
         fileValidationService.validateFile(file, MAX_FILE_SIZE, "知识库");
 
@@ -163,6 +166,7 @@ public class KnowledgeBaseUploadService {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "知识库缺少存储信息，无法重新向量化");
         }
 
+        registry.getDefaultEmbeddingModel(userId);
         log.info("开始重新向量化知识库: kbId={}", kbId);
 
         // 1. 更新状态为 PENDING 并清零自动恢复计数（手动重试重新获得完整恢复额度）

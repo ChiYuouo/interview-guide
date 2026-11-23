@@ -87,6 +87,8 @@ public class SecurityConfig {
             .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/actuator/health").permitAll()
             .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/auth/session").authenticated()
+            .requestMatchers("/api/llm-provider/reload").hasRole("ADMIN")
+            .requestMatchers("/api/llm-provider", "/api/llm-provider/**").authenticated()
             .requestMatchers("/api/interview-schedule", "/api/interview-schedule/**").authenticated()
             .requestMatchers("/api/resumes", "/api/resumes/**").authenticated()
             .requestMatchers("/api/interview/sessions", "/api/interview/sessions/**",

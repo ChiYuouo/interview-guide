@@ -8,8 +8,6 @@ import interview.guide.modules.llmprovider.dto.CreateProviderRequest;
 import interview.guide.modules.llmprovider.dto.DefaultProviderDTO;
 import interview.guide.modules.llmprovider.dto.UpdateProviderRequest;
 import interview.guide.modules.voiceinterview.config.VoiceInterviewProperties;
-import interview.guide.modules.voiceinterview.service.QwenAsrService;
-import interview.guide.modules.voiceinterview.service.QwenTtsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -47,8 +45,6 @@ class LlmProviderConfigServiceTest {
     @Mock private LlmProviderProperties properties;
     @Mock private LlmProviderRegistry registry;
     @Mock private VoiceInterviewProperties voiceProperties;
-    @Mock private QwenAsrService asrService;
-    @Mock private QwenTtsService ttsService;
 
     private LlmProviderConfigService service;
 
@@ -69,9 +65,7 @@ class LlmProviderConfigServiceTest {
         service = new LlmProviderConfigService(
             properties,
             registry,
-            voiceProperties,
-            asrService,
-            ttsService
+            voiceProperties
         );
     }
 
@@ -90,7 +84,7 @@ class LlmProviderConfigServiceTest {
             when(properties.getConfigEnvPath()).thenReturn(tempDir.resolve(".env").toString());
 
             LlmProviderConfigService failing = new LlmProviderConfigService(
-                properties, registry, voiceProperties, asrService, ttsService);
+                properties, registry, voiceProperties);
 
             assertThrows(BusinessException.class, failing::validateWritablePaths);
         }
@@ -113,7 +107,7 @@ class LlmProviderConfigServiceTest {
         void listProvidersReturnsEmptyWhenProvidersNull() {
             when(properties.getProviders()).thenReturn(null);
 
-            assertTrue(service.listProviders().isEmpty());
+            assertTrue(service.listProviders(1L).isEmpty());
         }
 
         @Test
@@ -121,7 +115,7 @@ class LlmProviderConfigServiceTest {
         void getProviderThrowsWhenProviderMissing() {
             when(properties.getProviders()).thenReturn(new HashMap<>());
 
-            assertThrows(BusinessException.class, () -> service.getProvider("unknown"));
+            assertThrows(BusinessException.class, () -> service.getProvider(1L, "unknown"));
         }
 
         @Test
@@ -164,7 +158,7 @@ class LlmProviderConfigServiceTest {
                 null
             );
 
-            assertThrows(BusinessException.class, () -> service.createProvider(request));
+            assertThrows(BusinessException.class, () -> service.createProvider(1L, request));
         }
 
         @Test
@@ -172,7 +166,7 @@ class LlmProviderConfigServiceTest {
         void deleteProviderThrowsForDefaultProvider() {
             when(properties.getDefaultProvider()).thenReturn("dashscope");
 
-            assertThrows(BusinessException.class, () -> service.deleteProvider("dashscope"));
+            assertThrows(BusinessException.class, () -> service.deleteProvider(1L, "dashscope"));
         }
 
         @Test
@@ -188,7 +182,7 @@ class LlmProviderConfigServiceTest {
             providers.put("dashscope", config);
             when(properties.getProviders()).thenReturn(providers);
 
-            service.updateProvider("dashscope", new UpdateProviderRequest(null, null, null, "", null));
+            service.updateProvider(1L, "dashscope", new UpdateProviderRequest(null, null, null, "", null));
 
             assertNull(config.getEmbeddingModel());
             verify(registry).reload();
@@ -207,7 +201,7 @@ class LlmProviderConfigServiceTest {
             providers.put("dashscope", config);
             when(properties.getProviders()).thenReturn(providers);
 
-            service.updateProvider("dashscope", new UpdateProviderRequest(null, null, null, "   ", null));
+            service.updateProvider(1L, "dashscope", new UpdateProviderRequest(null, null, null, "   ", null));
 
             assertNull(config.getEmbeddingModel());
             verify(registry).reload();
@@ -222,16 +216,16 @@ class LlmProviderConfigServiceTest {
             when(properties.getProviders()).thenReturn(providers);
 
             assertThrows(BusinessException.class, () ->
-                service.updateProvider("dashscope",
+                service.updateProvider(1L, "dashscope",
                     new UpdateProviderRequest("", null, null, null, null)));
             assertThrows(BusinessException.class, () ->
-                service.updateProvider("dashscope",
+                service.updateProvider(1L, "dashscope",
                     new UpdateProviderRequest("   ", null, null, null, null)));
             assertThrows(BusinessException.class, () ->
-                service.updateProvider("dashscope",
+                service.updateProvider(1L, "dashscope",
                     new UpdateProviderRequest(null, null, "", null, null)));
             assertThrows(BusinessException.class, () ->
-                service.updateProvider("dashscope",
+                service.updateProvider(1L, "dashscope",
                     new UpdateProviderRequest(null, "  ", null, null, null)));
         }
     }
@@ -249,7 +243,7 @@ class LlmProviderConfigServiceTest {
 
             BusinessException exception = assertThrows(
                 BusinessException.class,
-                () -> service.updateDefaultProvider(new DefaultProviderDTO("unknown"))
+                () -> service.updateDefaultProvider(1L, new DefaultProviderDTO("unknown"))
             );
 
             assertEquals(ErrorCode.PROVIDER_NOT_FOUND.getCode(), exception.getCode());
@@ -265,7 +259,7 @@ class LlmProviderConfigServiceTest {
             providers.put("glm", createProviderConfig("https://open.bigmodel.cn/api/coding/paas/v4", "key", "glm-4-flash", null));
             when(properties.getProviders()).thenReturn(providers);
 
-            service.updateDefaultProvider(new DefaultProviderDTO("glm"));
+            service.updateDefaultProvider(1L, new DefaultProviderDTO("glm"));
 
             verify(properties).setDefaultProvider("glm");
             verify(registry).reload();
@@ -280,7 +274,7 @@ class LlmProviderConfigServiceTest {
             when(properties.getConfigYamlPath()).thenReturn(null);
             when(properties.getConfigEnvPath()).thenReturn(envFile.toString());
             return new LlmProviderConfigService(
-                properties, registry, voiceProperties, asrService, ttsService);
+                properties, registry, voiceProperties);
         }
 
         @Test
@@ -331,9 +325,9 @@ class LlmProviderConfigServiceTest {
             when(properties.getConfigEnvPath()).thenReturn(null);
 
             LlmProviderConfigService nullEnvService = new LlmProviderConfigService(
-                properties, registry, voiceProperties, asrService, ttsService);
+                properties, registry, voiceProperties);
 
-            assertDoesNotThrow(() -> nullEnvService.createProvider(
+            assertDoesNotThrow(() -> nullEnvService.createProvider(1L,
                 new CreateProviderRequest("test", "http://localhost", "key", "model", null, null)));
         }
 
@@ -364,11 +358,11 @@ class LlmProviderConfigServiceTest {
             when(properties.getConfigEnvPath()).thenReturn(null);
 
             LlmProviderConfigService yamlService = new LlmProviderConfigService(
-                properties, registry, voiceProperties, asrService, ttsService);
+                properties, registry, voiceProperties);
 
             when(properties.getProviders()).thenReturn(new HashMap<>());
 
-            yamlService.createProvider(
+            yamlService.createProvider(1L,
                 new CreateProviderRequest("kimi", "https://api.moonshot.cn/v1", "key", "kimi-latest", null, null));
 
             assertTrue(Files.exists(yamlFile));
@@ -395,11 +389,11 @@ class LlmProviderConfigServiceTest {
             when(properties.getConfigEnvPath()).thenReturn(null);
 
             LlmProviderConfigService yamlService = new LlmProviderConfigService(
-                properties, registry, voiceProperties, asrService, ttsService);
+                properties, registry, voiceProperties);
 
             when(properties.getProviders()).thenReturn(new HashMap<>());
 
-            yamlService.createProvider(
+            yamlService.createProvider(1L,
                 new CreateProviderRequest("kimi", "https://api.moonshot.cn/v1", "key", "kimi-latest", null, null));
 
             String content = Files.readString(yamlFile, StandardCharsets.UTF_8);
@@ -415,9 +409,9 @@ class LlmProviderConfigServiceTest {
             when(properties.getConfigEnvPath()).thenReturn(null);
 
             LlmProviderConfigService nullYamlService = new LlmProviderConfigService(
-                properties, registry, voiceProperties, asrService, ttsService);
+                properties, registry, voiceProperties);
 
-            assertDoesNotThrow(() -> nullYamlService.createProvider(
+            assertDoesNotThrow(() -> nullYamlService.createProvider(1L,
                 new CreateProviderRequest("test", "http://localhost", "key", "model", null, null)));
         }
     }

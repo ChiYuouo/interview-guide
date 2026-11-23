@@ -6,6 +6,7 @@ import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptio
 import org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration;
 import org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration;
 import org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration;
+import org.springframework.ai.vectorstore.pgvector.autoconfigure.PgVectorStoreAutoConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -21,7 +22,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
     OpenAiChatAutoConfiguration.class,
     OpenAiEmbeddingAutoConfiguration.class,
     OpenAiImageAutoConfiguration.class,
-    OpenAiModerationAutoConfiguration.class
+    OpenAiModerationAutoConfiguration.class,
+    PgVectorStoreAutoConfiguration.class
 })
 public class App {
 

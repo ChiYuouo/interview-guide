@@ -31,6 +31,8 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,9 +49,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LlmProviderRegistry {
 
     private final LlmProviderProperties properties;
-    private final Map<String, ChatClient> clientCache = new ConcurrentHashMap<>();
-    private final Map<String, OpenAiChatModel> chatModelCache = new ConcurrentHashMap<>();
-    private final Map<String, EmbeddingModel> embeddingModelCache = new ConcurrentHashMap<>();
+    private final Map<ClientKey, ChatClient> clientCache = new ConcurrentHashMap<>();
+    private final Map<ModelKey, OpenAiChatModel> chatModelCache = new ConcurrentHashMap<>();
+    private final Map<ModelKey, EmbeddingModel> embeddingModelCache = new ConcurrentHashMap<>();
     private final LlmProviderRepository providerRepository;
     private final LlmGlobalSettingRepository globalSettingRepository;
     private final ApiKeyEncryptionService encryptionService;
@@ -92,11 +94,9 @@ public class LlmProviderRegistry {
      * @return A ChatClient instance
      * @throws IllegalArgumentException if the providerId is unknown
      */
-    public ChatClient getChatClient(String providerId) {
-        return clientCache.computeIfAbsent(providerId, id -> {
-            log.info("[LlmProviderRegistry] Creating new client for provider: {}", id);
-            return createChatClient(id);
-        });
+    public ChatClient getChatClient(Long userId, String providerId) {
+        return clientCache.computeIfAbsent(new ClientKey(userId, providerId, "chat"),
+            key -> createChatClient(userId, providerId));
     }
 
     /**
@@ -104,25 +104,25 @@ public class LlmProviderRegistry {
      *
      * @return The default ChatClient instance
      */
-    public ChatClient getDefaultChatClient() {
-        return getChatClient(resolveDefaultChatProviderId());
+    public ChatClient getDefaultChatClient(Long userId) {
+        return getChatClientOrDefault(userId, null);
     }
 
     /**
      * 获取默认 Provider 的 Plain ChatClient，当前用于知识库查询。
-     * 与 {@link #getDefaultChatClient()} 的区别在于不注册工具回调、ToolCall、Memory 或 Logger Advisor，
+     * 与 {@link #getDefaultChatClient(Long)} 的区别在于不注册工具回调、ToolCall、Memory 或 Logger Advisor，
      * 仅按配置注册 SafeGuardAdvisor。
      */
-    public ChatClient getPlainChatClient() {
-        return getPlainChatClient(resolveDefaultChatProviderId());
+    public ChatClient getPlainChatClient(Long userId) {
+        return getPlainChatClient(userId, null);
     }
 
     /**
      * Get a ChatClient for the specified provider, falling back to the default if null, blank, or
      * the legacy "default" alias.
      */
-    public ChatClient getChatClientOrDefault(String providerId) {
-        return getChatClient(resolveProviderId(providerId));
+    public ChatClient getChatClientOrDefault(Long userId, String providerId) {
+        return getChatClient(userId, resolveProviderId(userId, providerId));
     }
 
     /**
@@ -130,21 +130,23 @@ public class LlmProviderRegistry {
      * 不注册工具回调，仅按配置注册 SafeGuardAdvisor，减少工具调用对结构化输出的干扰。
      * 面试评分和简历分析当前仍使用默认类型的 ChatClient；结构化输出不会自动切换为 Plain。
      *
-     * @see #getChatClientOrDefault(String)
-     * @see #getDefaultChatClient()
+     * @see #getChatClientOrDefault(Long, String)
+     * @see #getDefaultChatClient(Long)
      */
-    public ChatClient getPlainChatClient(String providerId) {
-        String id = resolveProviderId(providerId);
-        return clientCache.computeIfAbsent(id + ":plain", key -> createPlainChatClient(id));
+    public ChatClient getPlainChatClient(Long userId, String providerId) {
+        String id = resolveProviderId(userId, providerId);
+        return clientCache.computeIfAbsent(new ClientKey(userId, id, "plain"),
+            key -> createPlainChatClient(userId, id));
     }
 
     /**
      * 获取语音面试专用 ChatClient：SkillsTool + ToolCallAdvisor（流式）。
      * 不加 Memory Advisor（语音面试手动管理对话历史）。
      */
-    public ChatClient getVoiceChatClient(String providerId) {
-        String id = resolveProviderId(providerId);
-        return clientCache.computeIfAbsent(id + ":voice", key -> createVoiceChatClient(id));
+    public ChatClient getVoiceChatClient(Long userId, String providerId) {
+        String id = resolveProviderId(userId, providerId);
+        return clientCache.computeIfAbsent(new ClientKey(userId, id, "voice"),
+            key -> createVoiceChatClient(userId, id));
     }
 
     /**
@@ -158,19 +160,36 @@ public class LlmProviderRegistry {
         log.info("[LlmProviderRegistry] Cache cleared ({} entries). Next access will re-create clients.", size);
     }
 
-    public EmbeddingModel getEmbeddingModel(String providerId) {
-        return embeddingModelCache.computeIfAbsent(providerId, id -> {
-            log.info("[LlmProviderRegistry] Creating new embedding model for provider: {}", id);
-            return createEmbeddingModel(id);
-        });
+    public void reload(Long userId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    invalidateUser(userId);
+                }
+            });
+        } else {
+            invalidateUser(userId);
+        }
     }
 
-    public EmbeddingModel getDefaultEmbeddingModel() {
-        return getEmbeddingModel(resolveDefaultEmbeddingProviderId());
+    private void invalidateUser(Long userId) {
+        clientCache.keySet().removeIf(key -> key.userId().equals(userId));
+        chatModelCache.keySet().removeIf(key -> key.userId().equals(userId));
+        embeddingModelCache.keySet().removeIf(key -> key.userId().equals(userId));
     }
 
-    private ChatClient createChatClient(String providerId) {
-        OpenAiChatModel chatModel = getChatModel(providerId);
+    public EmbeddingModel getEmbeddingModel(Long userId, String providerId) {
+        return embeddingModelCache.computeIfAbsent(new ModelKey(userId, providerId),
+            key -> createEmbeddingModel(userId, providerId));
+    }
+
+    public EmbeddingModel getDefaultEmbeddingModel(Long userId) {
+        return getEmbeddingModel(userId, resolveDefaultEmbeddingProviderId(userId));
+    }
+
+    private ChatClient createChatClient(Long userId, String providerId) {
+        OpenAiChatModel chatModel = getChatModel(userId, providerId);
 
         ChatClient.Builder builder = ChatClient.builder(chatModel);
         if (interviewSkillsToolCallback != null) {
@@ -185,16 +204,16 @@ public class LlmProviderRegistry {
         return builder.build();
     }
 
-    private ChatClient createPlainChatClient(String providerId) {
-        OpenAiChatModel chatModel = getChatModel(providerId);
+    private ChatClient createPlainChatClient(Long userId, String providerId) {
+        OpenAiChatModel chatModel = getChatModel(userId, providerId);
         ChatClient.Builder builder = ChatClient.builder(chatModel);
         buildSafeGuardAdvisor().ifPresent(advisor -> builder.defaultAdvisors(List.of(advisor)));
         log.info("[LlmProviderRegistry] Created plain ChatClient (no tools) for {}", providerId);
         return builder.build();
     }
 
-    private ChatClient createVoiceChatClient(String providerId) {
-        OpenAiChatModel chatModel = getChatModel(providerId);
+    private ChatClient createVoiceChatClient(Long userId, String providerId) {
+        OpenAiChatModel chatModel = getChatModel(userId, providerId);
 
         ChatClient.Builder builder = ChatClient.builder(chatModel);
         if (interviewSkillsToolCallback != null) {
@@ -212,15 +231,13 @@ public class LlmProviderRegistry {
         return builder.build();
     }
 
-    private OpenAiChatModel getChatModel(String providerId) {
-        return chatModelCache.computeIfAbsent(providerId, id -> {
-            log.info("[LlmProviderRegistry] Creating new ChatModel for provider: {}", id);
-            return buildChatModel(id);
-        });
+    private OpenAiChatModel getChatModel(Long userId, String providerId) {
+        return chatModelCache.computeIfAbsent(new ModelKey(userId, providerId),
+            key -> buildChatModel(userId, providerId));
     }
 
-    private OpenAiChatModel buildChatModel(String providerId) {
-        ProviderSnapshot config = loadProviderOrThrow(providerId);
+    private OpenAiChatModel buildChatModel(Long userId, String providerId) {
+        ProviderSnapshot config = loadProviderOrThrow(userId, providerId);
         log.info("[LlmProviderRegistry] Building ChatModel - Provider: {}, BaseUrl: {}, Model: {}",
                  providerId, config.baseUrl(), config.model());
 
@@ -239,8 +256,8 @@ public class LlmProviderRegistry {
             .build();
     }
 
-    private EmbeddingModel createEmbeddingModel(String providerId) {
-        ProviderSnapshot config = loadProviderOrThrow(providerId);
+    private EmbeddingModel createEmbeddingModel(Long userId, String providerId) {
+        ProviderSnapshot config = loadProviderOrThrow(userId, providerId);
         if (!config.supportsEmbedding() || isBlank(config.embeddingModel())) {
             throw new BusinessException(ErrorCode.PROVIDER_CONFIG_READ_FAILED,
                 "Provider '" + providerId + "' 未配置可用的 Embedding 模型，无法执行知识库向量化");
@@ -318,48 +335,61 @@ public class LlmProviderRegistry {
         return Optional.of(advisor);
     }
 
-    private String resolveProviderId(String providerId) {
+    public String resolveChatProviderId(Long userId, String providerId) {
+        String id = resolveProviderId(userId, providerId);
+        loadProviderOrThrow(userId, id);
+        return id;
+    }
+
+    private String resolveProviderId(Long userId, String providerId) {
         if (providerId == null || providerId.isBlank() || "default".equalsIgnoreCase(providerId.trim())) {
-            return resolveDefaultChatProviderId();
+            return resolveDefaultChatProviderId(userId);
         }
         return providerId;
     }
 
-    private String resolveDefaultChatProviderId() {
+    private String resolveDefaultChatProviderId(Long userId) {
         if (globalSettingRepository == null) {
             return properties.getDefaultProvider();
         }
-        return globalSettingRepository.findById(LlmGlobalSettingEntity.SINGLETON_ID)
+        return globalSettingRepository.findById(userId)
             .map(LlmGlobalSettingEntity::getDefaultChatProviderId)
             .filter(id -> !isBlank(id))
-            .orElse(properties.getDefaultProvider());
+            .orElseThrow(() -> new BusinessException(ErrorCode.PROVIDER_CONFIG_READ_FAILED,
+                "请先配置模型和 API Key"));
     }
 
-    private String resolveDefaultEmbeddingProviderId() {
+    private String resolveDefaultEmbeddingProviderId(Long userId) {
         if (globalSettingRepository == null) {
             return !isBlank(properties.getDefaultEmbeddingProvider())
                 ? properties.getDefaultEmbeddingProvider()
                 : properties.getDefaultProvider();
         }
-        return globalSettingRepository.findById(LlmGlobalSettingEntity.SINGLETON_ID)
+        return globalSettingRepository.findById(userId)
             .map(LlmGlobalSettingEntity::getDefaultEmbeddingProviderId)
             .filter(id -> !isBlank(id))
-            .orElseGet(() -> !isBlank(properties.getDefaultEmbeddingProvider())
-                ? properties.getDefaultEmbeddingProvider()
-                : properties.getDefaultProvider());
+            .orElseThrow(() -> new BusinessException(ErrorCode.PROVIDER_CONFIG_READ_FAILED,
+                "请先配置向量模型和 API Key"));
     }
 
-    private ProviderSnapshot loadProviderOrThrow(String providerId) {
+    private ProviderSnapshot loadProviderOrThrow(Long userId, String providerId) {
         if (providerRepository == null) {
             return loadProviderFromPropertiesOrThrow(providerId);
         }
-        LlmProviderEntity entity = providerRepository.findById(providerId)
+        LlmProviderEntity entity = providerRepository.findByIdAndUserId(providerId, userId)
             .filter(LlmProviderEntity::isEnabled)
-            .orElseThrow(() -> new IllegalArgumentException("Unknown LLM provider: " + providerId));
+            .orElseThrow(() -> new BusinessException(ErrorCode.PROVIDER_NOT_FOUND, "个人模型不存在，请前往设置配置模型和 API Key"));
+        if (entity.getApiKeyCiphertext() == null || entity.getApiKeyCiphertext().isBlank()) {
+            throw new BusinessException(ErrorCode.PROVIDER_CONFIG_READ_FAILED, "请先配置模型和 API Key");
+        }
+        String apiKey = encryptionService.decrypt(entity.getApiKeyNonce(), entity.getApiKeyCiphertext());
+        if (isBlank(apiKey)) {
+            throw new BusinessException(ErrorCode.PROVIDER_CONFIG_READ_FAILED, "请先配置模型和 API Key");
+        }
         return new ProviderSnapshot(
             entity.getId(),
             entity.getBaseUrl(),
-            encryptionService.decrypt(entity.getApiKeyNonce(), entity.getApiKeyCiphertext()),
+            apiKey,
             entity.getModel(),
             entity.getEmbeddingModel(),
             entity.getEmbeddingDimensions(),
@@ -398,6 +428,10 @@ public class LlmProviderRegistry {
         }
         return properties.getEmbeddingDimensions();
     }
+
+    private record ModelKey(Long userId, String providerId) {}
+
+    private record ClientKey(Long userId, String providerId, String kind) {}
 
     private record ProviderSnapshot(
         String id,

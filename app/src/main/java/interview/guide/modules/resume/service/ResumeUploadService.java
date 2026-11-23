@@ -1,6 +1,7 @@
 package interview.guide.modules.resume.service;
 
 import interview.guide.common.config.AppConfigProperties;
+import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
@@ -41,6 +42,7 @@ public class ResumeUploadService {
     private final AnalyzeStreamProducer analyzeStreamProducer;
     private final ResumeRepository resumeRepository;
     private final TransactionalExecutor transactionalExecutor;
+    private final LlmProviderRegistry registry;
 
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -51,6 +53,7 @@ public class ResumeUploadService {
      * @return 上传结果（分析将异步进行）
      */
     public Map<String, Object> uploadAndAnalyze(Long userId, MultipartFile file) {
+        registry.resolveChatProviderId(userId, null);
         long startTime = System.currentTimeMillis();
 
         // 1. 验证文件
@@ -204,6 +207,7 @@ public class ResumeUploadService {
      * @param resumeId 简历ID
      */
     public void reanalyze(Long userId, Long resumeId) {
+        registry.resolveChatProviderId(userId, null);
         transactionalExecutor.run(() -> {
             ResumeEntity resume = persistenceService.requireOwnedResume(userId, resumeId);
             resume.setAnalyzeStatus(AsyncTaskStatus.PENDING);

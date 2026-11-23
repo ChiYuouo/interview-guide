@@ -80,7 +80,7 @@ class VoiceInterviewSummaryPersistenceTest {
   @Test
   @DisplayName("更新摘要应复用已有行，避免先删后插的竞态窗口")
   void saveSummaryUpdatesExistingRow() {
-    VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().id(42L).build();
+    VoiceInterviewSessionEntity session = VoiceInterviewSessionEntity.builder().userId(1L).id(42L).build();
     VoiceInterviewMessageEntity existing = VoiceInterviewMessageEntity.builder()
         .id(7L)
         .sessionId(42L)

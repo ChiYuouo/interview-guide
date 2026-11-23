@@ -1,5 +1,6 @@
 package interview.guide.modules.knowledgebase.service;
 
+import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.config.KnowledgeBaseUploadProperties;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
@@ -288,11 +289,12 @@ class KnowledgeBaseUploadConcurrencyTest {
     properties.setMaxConcurrent(maximum);
     return new KnowledgeBaseUploadService(parseService, persistenceService, storageService,
         repository, validationService, hashService, producer,
-        new KnowledgeBaseUploadLimiter(properties));
+        new KnowledgeBaseUploadLimiter(properties), mock(LlmProviderRegistry.class));
   }
 
   private KnowledgeBaseEntity stubDuplicateUpload() {
     KnowledgeBaseEntity existing = new KnowledgeBaseEntity();
+        existing.setUserId(1L);
     existing.setId(42L);
     when(parseService.detectContentType(file)).thenReturn("application/pdf");
     when(hashService.calculateHash(file)).thenReturn("existing-hash");
