@@ -84,8 +84,9 @@ public class SecurityConfig {
         .requestCache(AbstractHttpConfigurer::disable)
         .authorizeHttpRequests(auth -> auth
             .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
-            .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/actuator/health").permitAll()
-            .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/auth/config", "/actuator/health")
+            .permitAll()
+            .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/register").permitAll()
             .requestMatchers(HttpMethod.GET, "/api/auth/session").authenticated()
             .requestMatchers("/api/llm-provider/reload").hasRole("ADMIN")
             .requestMatchers("/api/llm-provider", "/api/llm-provider/**").authenticated()
@@ -102,9 +103,13 @@ public class SecurityConfig {
             .authenticationEntryPoint((request, response, error) ->
                 writeLoginRequired(response, mapper))
             .accessDeniedHandler((request, response, error) -> {
+              String requestUri = request.getRequestURI();
+              boolean isPublicAuthPost =
+                  (request.getContextPath() + "/api/auth/login").equals(requestUri)
+                      || (request.getContextPath() + "/api/auth/register").equals(requestUri);
               if (error instanceof CsrfException
                   && SecurityContextHolder.getContext().getAuthentication() == null
-                  && !(request.getContextPath() + "/api/auth/login").equals(request.getRequestURI())) {
+                  && !isPublicAuthPost) {
                 writeLoginRequired(response, mapper);
               } else {
                 String message = error instanceof CsrfException

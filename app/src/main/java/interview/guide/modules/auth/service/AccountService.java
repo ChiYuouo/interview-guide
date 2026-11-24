@@ -6,6 +6,7 @@ import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.auth.model.AccountPrincipal;
 import interview.guide.modules.auth.model.AccountRole;
 import interview.guide.modules.auth.model.CreateAccountRequest;
+import interview.guide.modules.auth.model.RegisterRequest;
 import interview.guide.modules.auth.model.UserAccountEntity;
 import interview.guide.modules.auth.repository.UserAccountRepository;
 import java.util.Locale;
@@ -39,9 +40,9 @@ public class AccountService implements UserDetailsService {
     String username = properties.getUsername();
     String password = properties.getPassword();
     if (username == null || username.isBlank() || !username.equals(username.strip())
-        || normalize(username).length() > 64 || password.length() < 12
+        || normalize(username).length() > 64 || password.length() < 8
         || password.length() > 256) {
-      throw new IllegalStateException("请配置有效的管理员账号（1–64 字符）和密码（12–256 字符）");
+      throw new IllegalStateException("请配置有效的管理员账号（1–64 字符）和密码（8–256 字符）");
     }
     String normalized = normalize(username);
     if (accounts.findByUsername(normalized).filter(other -> other.getId() != ADMIN_ID).isPresent()) {
@@ -55,16 +56,37 @@ public class AccountService implements UserDetailsService {
 
   @Transactional
   public void createUser(CreateAccountRequest request) {
-    String username = normalize(request.username());
+    createUserAccount(request.username(), request.password());
+  }
+
+  @Transactional
+  public AccountPrincipal registerUser(RegisterRequest request) {
+    return new AccountPrincipal(createUserAccount(request.username(), request.password()));
+  }
+
+  private UserAccountEntity createUserAccount(String rawUsername, String rawPassword) {
+    String username = rawUsername == null ? "" : normalize(rawUsername);
+    if (username.isEmpty()) {
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "请输入账号");
+    }
     if (username.length() > 64) {
       throw new BusinessException(ErrorCode.BAD_REQUEST, "账号最多 64 个字符");
     }
+    if (rawPassword == null || rawPassword.isBlank()) {
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "请输入密码");
+    }
+    if (rawPassword.length() < 8 || rawPassword.length() > 256) {
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "密码长度需在 8–256 个字符之间");
+    }
+    if (accounts.findByUsername(username).isPresent()) {
+      throw new BusinessException(ErrorCode.BAD_REQUEST, "账号已存在");
+    }
     var account = new UserAccountEntity();
     account.setUsername(username);
-    account.setPasswordHash(passwordEncoder.encode(request.password()));
+    account.setPasswordHash(passwordEncoder.encode(rawPassword));
     account.setRole(AccountRole.USER);
     try {
-      accounts.saveAndFlush(account);
+      return accounts.saveAndFlush(account);
     } catch (DataIntegrityViolationException e) {
       throw new BusinessException(ErrorCode.BAD_REQUEST, "账号已存在");
     }

@@ -7,6 +7,9 @@ test('登录后返回原页面，刷新保持会话，退出后重新要求登�
   const session = { username: 'admin', admin: true };
   const csrf = { headerName: 'X-CSRF-TOKEN', token: 'test-csrf-token' };
 
+  await page.route('**/api/auth/config', route => route.fulfill({
+    json: { code: 200, message: 'success', data: { registrationEnabled: true } },
+  }));
   await page.route('**/api/auth/session', route => signedIn
     ? route.fulfill({ json: { code: 200, message: 'success', data: session } })
     : route.fulfill({ status: 401, json: { code: 401, message: '请先登录', data: null } }));
@@ -104,4 +107,83 @@ test('普通账号可以打开知识库、面试和个人模型设置', async ({
   await expect(page.getByRole('button', { name: '语音面试', exact: true })).toBeVisible();
   await page.goto('/voice-interview');
   await expect(page).toHaveURL(/\/voice-interview$/);
+});
+
+test('开启自助注册时支持校验密码并注册后自动进入工作台', async ({ page }) => {
+  const password = randomUUID();
+  const session = { username: 'newuser', admin: false };
+  const csrf = { headerName: 'X-CSRF-TOKEN', token: 'register-csrf-token' };
+  let signedIn = false;
+  let registerRequests = 0;
+
+  await page.route('**/api/auth/config', route => route.fulfill({
+    json: { code: 200, message: 'success', data: { registrationEnabled: true } },
+  }));
+  await page.route('**/api/auth/session', route => signedIn
+    ? route.fulfill({ json: { code: 200, message: 'success', data: session } })
+    : route.fulfill({ status: 401, json: { code: 401, message: '请先登录', data: null } }));
+  await page.route('**/api/auth/csrf', route => route.fulfill({
+    json: { code: 200, message: 'success', data: csrf },
+  }));
+  await page.route('**/api/auth/register', route => {
+    registerRequests += 1;
+    expect(route.request().headers()['x-csrf-token']).toBe(csrf.token);
+    expect(route.request().postDataJSON()).toEqual({ username: session.username, password });
+    signedIn = true;
+    return route.fulfill({ json: { code: 200, message: 'success', data: session } });
+  });
+  await page.route('**/api/interview-schedule**', route => route.fulfill({
+    json: { code: 200, message: 'success', data: [] },
+  }));
+
+  await page.goto('/login');
+  await expect(page.getByRole('heading', { name: '登录面试工作台' })).toBeVisible();
+  await page.getByRole('tab', { name: '注册' }).click();
+  await expect(page.getByRole('heading', { name: '注册面试工作台账号' })).toBeVisible();
+  await expect(page.getByText('密码至少 8 位')).toBeVisible();
+
+  await page.getByLabel('账号', { exact: true }).fill(`  ${session.username}  `);
+  await page.getByLabel('密码', { exact: true }).fill('short77');
+  await page.getByLabel('确认密码', { exact: true }).fill('short77');
+  await page.getByRole('button', { name: '注册', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('密码至少需要 8 个字符');
+  expect(registerRequests).toBe(0);
+
+  await page.getByLabel('密码', { exact: true }).fill(password);
+  await page.getByLabel('确认密码', { exact: true }).fill(`${password}-mismatch`);
+  await page.getByRole('button', { name: '注册', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('两次输入的密码不一致');
+  expect(registerRequests).toBe(0);
+
+  await page.getByRole('tab', { name: '登录' }).click();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('tab', { name: '注册' }).click();
+
+  await page.getByLabel('密码', { exact: true }).fill(password);
+  await page.getByLabel('确认密码', { exact: true }).fill(password);
+  await page.getByRole('button', { name: '注册', exact: true }).click();
+
+  await expect(page).toHaveURL(/\/interview-schedule$/);
+  expect(registerRequests).toBe(1);
+  await expect(page.getByText(session.username, { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible();
+});
+
+test('关闭自助注册时隐藏注册入口', async ({ page }) => {
+  await page.route('**/api/auth/config', route => route.fulfill({
+    json: { code: 200, message: 'success', data: { registrationEnabled: false } },
+  }));
+  await page.route('**/api/auth/session', route => route.fulfill({
+    status: 401, json: { code: 401, message: '请先登录', data: null },
+  }));
+
+  const configResponse = page.waitForResponse('**/api/auth/config');
+  await page.goto('/login');
+  await configResponse;
+
+  await expect(page.getByRole('heading', { name: '登录面试工作台' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '注册' })).toHaveCount(0);
+  await expect(page.getByLabel('确认密码')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible();
 });

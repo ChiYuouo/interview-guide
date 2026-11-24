@@ -10,6 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AuthProperties {
   private String username;
   private String password;
+  private boolean registrationEnabled = true;
 
   public boolean hasCredentials() {
     return password != null && !password.isBlank();

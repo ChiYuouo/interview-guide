@@ -3,9 +3,11 @@ package interview.guide.modules.auth;
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.result.Result;
 import interview.guide.modules.auth.model.AccountPrincipal;
+import interview.guide.modules.auth.model.AuthConfigResponse;
 import interview.guide.modules.auth.model.CreateAccountRequest;
 import interview.guide.modules.auth.model.CsrfTokenResponse;
 import interview.guide.modules.auth.model.LoginRequest;
+import interview.guide.modules.auth.model.RegisterRequest;
 import interview.guide.modules.auth.model.SessionResponse;
 import interview.guide.modules.auth.service.AccountService;
 import interview.guide.modules.auth.service.AuthService;
@@ -33,6 +35,11 @@ public class AuthController {
     return Result.success(new CsrfTokenResponse(csrfToken.getHeaderName(), csrfToken.getToken()));
   }
 
+  @GetMapping("/config")
+  public Result<AuthConfigResponse> config() {
+    return Result.success(authService.getConfig());
+  }
+
   @PostMapping("/login")
   @RateLimit(dimension = RateLimit.Dimension.IP, count = 8, timeUnit = RateLimit.TimeUnit.MINUTES)
   @RateLimit(count = 30, timeUnit = RateLimit.TimeUnit.MINUTES)
@@ -41,6 +48,16 @@ public class AuthController {
       HttpServletRequest request,
       HttpServletResponse response) {
     return Result.success(authService.login(login, request, response));
+  }
+
+  @PostMapping("/register")
+  @RateLimit(dimension = RateLimit.Dimension.IP, count = 5, timeUnit = RateLimit.TimeUnit.MINUTES)
+  @RateLimit(count = 30, timeUnit = RateLimit.TimeUnit.MINUTES)
+  public Result<SessionResponse> register(
+      @Valid @RequestBody RegisterRequest register,
+      HttpServletRequest request,
+      HttpServletResponse response) {
+    return Result.success(authService.register(register, request, response));
   }
 
   @GetMapping("/session")

@@ -106,6 +106,7 @@ app:
   auth:
     username: ${APP_AUTH_USERNAME:admin}
     password: ${APP_AUTH_PASSWORD:}
+    registration-enabled: ${APP_AUTH_REGISTRATION_ENABLED:true}
   ai:
     default-provider: dashscope
     default-embedding-provider: dashscope

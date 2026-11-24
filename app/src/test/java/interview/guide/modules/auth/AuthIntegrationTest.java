@@ -19,7 +19,9 @@ import interview.guide.infrastructure.mapper.ResumeMapperImpl;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.infrastructure.redis.RedisService;
 import interview.guide.modules.auth.model.AccountPrincipal;
+import interview.guide.modules.auth.model.CreateAccountRequest;
 import interview.guide.modules.auth.model.LoginRequest;
+import interview.guide.modules.auth.model.RegisterRequest;
 import interview.guide.modules.auth.model.UserAccountEntity;
 import interview.guide.modules.auth.repository.UserAccountRepository;
 import interview.guide.modules.auth.service.AccountService;
@@ -131,7 +133,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringJUnitWebConfig(AuthIntegrationTest.WebConfig.class)
 class AuthIntegrationTest {
   private static final String TEST_PASSWORD = UUID.randomUUID().toString();
+  private static final String CONFIG_PATH = "/api/auth/config";
   private static final String LOGIN_PATH = "/api/auth/login";
+  private static final String REGISTER_PATH = "/api/auth/register";
   private static final String SESSION_PATH = "/api/auth/session";
   private static final String USERS_PATH = "/api/auth/users";
   private static final String SCHEDULE_PATH = "/api/interview-schedule";
@@ -601,6 +605,126 @@ class AuthIntegrationTest {
         .andExpect(status().isForbidden());
   }
 
+  @Test
+  @DisplayName("未登录可查询认证配置，默认开放自助注册")
+  void exposesAuthConfigWithoutLogin() throws Exception {
+    mvc.perform(get(CONFIG_PATH))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(200))
+        .andExpect(jsonPath("$.data.registrationEnabled").value(true));
+  }
+
+  @Test
+  @DisplayName("自助注册校验 CSRF 与参数，成功后轮换会话并实现数据隔离")
+  void registersAndAuthenticatesSelfServiceUser() throws Exception {
+    mvc.perform(post(REGISTER_PATH).contentType("application/json")
+            .content(registerBody("selfreg", "Pass1234")))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value(403));
+
+    var anonymous = csrf(null);
+    mvc.perform(post(REGISTER_PATH).session(anonymous.session())
+            .header(anonymous.headerName(), anonymous.token())
+            .contentType("application/json")
+            .content(registerBody("shortpass", "1234567")))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(400));
+
+    mvc.perform(post(REGISTER_PATH).session(anonymous.session())
+            .header(anonymous.headerName(), anonymous.token())
+            .contentType("application/json")
+            .content(registerBody("   ", "Pass1234")))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(400));
+
+    String preRegisterSessionId = anonymous.session().getId();
+    var register = mvc.perform(post(REGISTER_PATH).session(anonymous.session())
+            .header(anonymous.headerName(), anonymous.token())
+            .contentType("application/json")
+            .content(registerBody("  SelfReg  ", "Pass1234")))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(200))
+        .andExpect(jsonPath("$.data.username").value("selfreg"))
+        .andExpect(jsonPath("$.data.admin").value(false))
+        .andReturn();
+
+    var session = (MockHttpSession) register.getRequest().getSession(false);
+    assertThat(session.getId()).isNotEqualTo(preRegisterSessionId);
+
+    mvc.perform(get(SESSION_PATH).session(session))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.username").value("selfreg"))
+        .andExpect(jsonPath("$.data.admin").value(false));
+
+    mvc.perform(post("/api/auth/logout").session(session)
+            .header(anonymous.headerName(), anonymous.token()))
+        .andExpect(status().isForbidden());
+
+    var selfReg = csrf(session);
+    mvc.perform(get(SCHEDULE_PATH + "/1").session(selfReg.session()))
+        .andExpect(jsonPath("$.code").value(SCHEDULE_NOT_FOUND));
+    long ownScheduleId = createSchedule(selfReg, "SelfReg 的日程");
+    mvc.perform(get(SCHEDULE_PATH).session(selfReg.session()))
+        .andExpect(jsonPath("$.data.length()").value(1))
+        .andExpect(jsonPath("$.data[0].id").value((int) ownScheduleId));
+
+    var adminSession = login("admin");
+    mvc.perform(get(SCHEDULE_PATH + "/" + ownScheduleId).session(adminSession))
+        .andExpect(jsonPath("$.code").value(SCHEDULE_NOT_FOUND));
+
+    var duplicateCaller = csrf(null);
+    mvc.perform(post(REGISTER_PATH).session(duplicateCaller.session())
+            .header(duplicateCaller.headerName(), duplicateCaller.token())
+            .contentType("application/json")
+            .content(registerBody("  SELFREG ", "Pass1234")))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(400))
+        .andExpect(jsonPath("$.message").value("账号已存在"));
+    mvc.perform(get(SESSION_PATH).session(duplicateCaller.session()))
+        .andExpect(status().isUnauthorized());
+
+    mvc.perform(post("/api/auth/logout").session(selfReg.session())
+            .header(selfReg.headerName(), selfReg.token()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(200));
+
+    var reloginCaller = csrf(null);
+    mvc.perform(post(LOGIN_PATH).session(reloginCaller.session())
+            .header(reloginCaller.headerName(), reloginCaller.token())
+            .contentType("application/json")
+            .content(mapper.writeValueAsString(new LoginRequest("selfreg", "Pass1234"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(200))
+        .andExpect(jsonPath("$.data.username").value("selfreg"))
+        .andExpect(jsonPath("$.data.admin").value(false));
+  }
+
+  @Test
+  @DisplayName("管理员创建账号支持 8 位密码并拒绝少于 8 位密码")
+  void enforcesEightCharPasswordForAdminCreatedUsers() throws Exception {
+    var admin = csrf(login("admin"));
+    mvc.perform(post(USERS_PATH).session(admin.session()).header(admin.headerName(), admin.token())
+            .contentType("application/json")
+            .content(mapper.writeValueAsString(new CreateAccountRequest("short-user", "1234567"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(400));
+
+    mvc.perform(post(USERS_PATH).session(admin.session()).header(admin.headerName(), admin.token())
+            .contentType("application/json")
+            .content(mapper.writeValueAsString(new CreateAccountRequest("eight-user", "Pass1234"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(200));
+
+    var caller = csrf(null);
+    mvc.perform(post(LOGIN_PATH).session(caller.session()).header(caller.headerName(), caller.token())
+            .contentType("application/json")
+            .content(mapper.writeValueAsString(new LoginRequest("eight-user", "Pass1234"))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value(200))
+        .andExpect(jsonPath("$.data.username").value("eight-user"))
+        .andExpect(jsonPath("$.data.admin").value(false));
+  }
+
   private MockHttpSession login(String username) throws Exception {
     var anonymous = csrf(null);
     var response = mvc.perform(post(LOGIN_PATH).session(anonymous.session())
@@ -648,6 +772,10 @@ class AuthIntegrationTest {
 
   private String loginBody(String password) {
     return mapper.writeValueAsString(new LoginRequest("admin", password));
+  }
+
+  private String registerBody(String username, String password) {
+    return mapper.writeValueAsString(new RegisterRequest(username, password));
   }
 
   private record CsrfSession(MockHttpSession session, String headerName, String token) {}

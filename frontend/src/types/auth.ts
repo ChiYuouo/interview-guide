@@ -7,3 +7,7 @@ export interface CsrfToken {
   headerName: string;
   token: string;
 }
+
+export interface AuthConfig {
+  registrationEnabled: boolean;
+}
